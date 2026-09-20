@@ -113,6 +113,7 @@ function runMiniHeartCloud(
   word: string,
   weight: number,
   color: string,
+  background: string,
 ): Promise<void> {
   const ratios = [1, 0.76, 0.58, 0.44, 0.34, 0.26, 0.2, 0.15, 0.11];
   const list: [string, number][] = ratios.map((r) => [word, Math.max(1, weight * r)]);
@@ -133,6 +134,7 @@ function runMiniHeartCloud(
       fontFamily: FONT_STACK,
       fontWeight: "700",
       color: () => shadeColor(color),
+      backgroundColor: background,
       clearCanvas: false,
       rotateRatio: 0.25,
       rotationSteps: 2,
@@ -311,7 +313,7 @@ export async function renderHeartCloud({
     paintInsideBackground(off, inside, palette.background);
 
     const color = REDS[i % REDS.length]!;
-    await runMiniHeartCloud(off, WordCloud, h.word, h.weight, color);
+    await runMiniHeartCloud(off, WordCloud, h.word, h.weight, color, palette.background);
     if (token !== renderToken) return;
 
     ctx.drawImage(off, h.x - cellSize / 2, h.y - cellSize / 2, cellSize, cellSize);
