@@ -21,46 +21,75 @@ function hexToRgb(hex: string): [number, number, number] {
  * and everything outside gets a near-identical colour that blocks words but
  * looks the same on screen.
  */
-async function paintMask(
-  canvas: HTMLCanvasElement,
-  dataUrl: string,
-  background: string,
-): Promise<void> {
-  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+export async function loadMaskImage(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
     image.onerror = () => reject(new Error("mask_load_failed"));
     image.src = dataUrl;
   });
+}
 
+/**
+ * Returns a width*height boolean map (1 = inside the shape / usable space).
+ * Shared by the classic text cloud (background-colour trick) and the heart
+ * cloud (direct placement queries).
+ */
+export function computeMaskInsideMap(
+  img: HTMLImageElement,
+  width: number,
+  height: number,
+): Uint8Array {
+  const off = document.createElement("canvas");
+  off.width = width;
+  off.height = height;
+  const octx = off.getContext("2d", { willReadFrequently: true });
+  const inside = new Uint8Array(width * height);
+  if (!octx) return inside;
+
+  const scale = Math.min(width / img.width, height / img.height);
+  const w = img.width * scale;
+  const h = img.height * scale;
+  const dx = (width - w) / 2;
+  const dy = (height - h) / 2;
+
+  octx.fillStyle = "#ffffff";
+  octx.fillRect(0, 0, width, height);
+  octx.drawImage(img, dx, dy, w, h);
+
+  const frame = octx.getImageData(0, 0, width, height);
+  const px = frame.data;
+  for (let i = 0, p = 0; i < px.length; i += 4, p++) {
+    const alpha = px[i + 3]!;
+    const luminance = (px[i]! * 299 + px[i + 1]! * 587 + px[i + 2]! * 114) / 1000;
+    // Inside the shape = opaque and dark → usable space.
+    inside[p] = alpha > 128 && luminance < 128 ? 1 : 0;
+  }
+  return inside;
+}
+
+export async function paintMaskBackground(
+  canvas: HTMLCanvasElement,
+  dataUrl: string,
+  background: string,
+): Promise<void> {
+  const img = await loadMaskImage(dataUrl);
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) return;
 
-  const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
-  const w = img.width * scale;
-  const h = img.height * scale;
-  const dx = (canvas.width - w) / 2;
-  const dy = (canvas.height - h) / 2;
-
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(img, dx, dy, w, h);
-
+  const inside = computeMaskInsideMap(img, canvas.width, canvas.height);
   const [br, bg, bb] = hexToRgb(background);
   const nr = br > 8 ? br - 4 : br + 4;
   const ng = bg > 8 ? bg - 4 : bg + 4;
   const nb = bb > 8 ? bb - 4 : bb + 4;
 
-  const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const frame = ctx.createImageData(canvas.width, canvas.height);
   const px = frame.data;
-  for (let i = 0; i < px.length; i += 4) {
-    const alpha = px[i + 3]!;
-    const luminance = (px[i]! * 299 + px[i + 1]! * 587 + px[i + 2]! * 114) / 1000;
-    // Inside the shape = opaque and dark → free space for words.
-    const inside = alpha > 128 && luminance < 128;
-    px[i] = inside ? br : nr;
-    px[i + 1] = inside ? bg : ng;
-    px[i + 2] = inside ? bb : nb;
+  for (let p = 0, i = 0; p < inside.length; p++, i += 4) {
+    const isIn = inside[p] === 1;
+    px[i] = isIn ? br : nr;
+    px[i + 1] = isIn ? bg : ng;
+    px[i + 2] = isIn ? bb : nb;
     px[i + 3] = 255;
   }
   ctx.putImageData(frame, 0, 0);
@@ -115,7 +144,7 @@ export async function renderWordCloud({
   };
 
   if (mask) {
-    await paintMask(canvas, mask.dataUrl, palette.background);
+    await paintMaskBackground(canvas, mask.dataUrl, palette.background);
     if (token !== renderToken) return;
   } else {
     ctx.fillStyle = palette.background;

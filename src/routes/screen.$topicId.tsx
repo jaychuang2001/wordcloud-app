@@ -2,11 +2,13 @@ import { ClientOnly, createFileRoute } from "@tanstack/react-router";
 import {
   Download,
   EyeOff,
+  Heart,
   ImagePlus,
   Maximize,
   Minimize,
   RotateCcw,
   Trash2,
+  Type,
   Upload,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -34,6 +36,7 @@ import {
   type TopicId,
 } from "@/lib/wordcloud-core";
 import { renderWordCloud, type MaskSource } from "@/lib/wordcloud-render";
+import { renderHeartCloud } from "@/lib/heartcloud-render";
 
 export const Route = createFileRoute("/screen/$topicId")({
   head: () => ({
@@ -88,6 +91,7 @@ function ScreenPage() {
   const [mask, setMask] = useState<MaskSource>(null);
   const [paletteId, setPaletteId] = useState("grey-wall");
   const [rotate, setRotate] = useState(true);
+  const [cloudMode, setCloudMode] = useState<"text" | "heart">("text");
   const [panel, setPanel] = useState(true);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
@@ -176,8 +180,12 @@ function ScreenPage() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.max(320, Math.floor(wrap.clientWidth * dpr));
     canvas.height = Math.max(240, Math.floor(wrap.clientHeight * dpr));
-    void renderWordCloud({ canvas, counts: dataRef.current.counts, palette, mask, rotate });
-  }, [palette, mask, rotate]);
+    if (cloudMode === "heart") {
+      void renderHeartCloud({ canvas, counts: dataRef.current.counts, palette, mask });
+    } else {
+      void renderWordCloud({ canvas, counts: dataRef.current.counts, palette, mask, rotate });
+    }
+  }, [palette, mask, rotate, cloudMode]);
 
   useEffect(() => {
     draw();
@@ -291,6 +299,11 @@ function ScreenPage() {
             ))}
           </div>
           <ScreenButton label={rotate ? "關閉文字傾斜" : "開啟文字傾斜"} onClick={() => setRotate((v) => !v)} icon={<RotateCcw />} />
+          <ScreenButton
+            label={cloudMode === "heart" ? "切換回文字雲" : "切換成愛心模式"}
+            onClick={() => setCloudMode((m) => (m === "heart" ? "text" : "heart"))}
+            icon={cloudMode === "heart" ? <Type /> : <Heart />}
+          />
           <ScreenButton label="上傳形狀遮罩" onClick={() => maskRef.current?.click()} icon={<ImagePlus />} />
           {mask ? <ScreenButton label="移除遮罩" onClick={() => setMask(null)} icon={<Trash2 />} /> : null}
           <ScreenButton label="匯出 CSV" onClick={() => downloadCsv(`${config.room}-topic${topicId}.csv`, toCsv(data, topicName))} icon={<Download />} />
