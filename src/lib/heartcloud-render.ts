@@ -1,5 +1,10 @@
 import type { Palette } from "./wordcloud-core";
-import { computeMaskInsideMap, loadMaskImage, paintMaskBackground } from "./wordcloud-render";
+import {
+  computeMaskInsideMap,
+  hexToRgb,
+  loadMaskImage,
+  paintMaskBackground,
+} from "./wordcloud-render";
 import type { MaskSource } from "./wordcloud-render";
 
 export type { MaskSource };
@@ -12,9 +17,10 @@ export type HeartCloudOptions = {
   maxHearts?: number;
 };
 
-type PlacedHeart = { x: number; y: number; r: number };
+const FONT_STACK = '"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif';
+const REDS = ["#c81e1e", "#e11d2e", "#b91c1c", "#ef4444", "#991b1b", "#f43f5e", "#dc2626"];
 
-/** A classic ❤ outline, centered horizontally at cx, spanning [cy, cy+size] vertically. */
+/** A classic ❤ outline, centered horizontally at cx, spanning [cyTop, cyTop+size] vertically. */
 function heartPath(ctx: CanvasRenderingContext2D, cx: number, cyTop: number, size: number) {
   const top = size * 0.3;
   ctx.beginPath();
@@ -40,104 +46,125 @@ function heartPath(ctx: CanvasRenderingContext2D, cx: number, cyTop: number, siz
   ctx.closePath();
 }
 
-const FONT_STACK = '"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif';
+/** Synchronous, vector-drawn heart occupancy map for a square canvas of `size` px. */
+function heartInsideMap(size: number): Uint8Array {
+  const off = document.createElement("canvas");
+  off.width = size;
+  off.height = size;
+  const octx = off.getContext("2d", { willReadFrequently: true });
+  const inside = new Uint8Array(size * size);
+  if (!octx) return inside;
 
-function fitFontSize(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  maxWidth: number,
-  startSize: number,
-  minSize = 9,
-): number {
-  let size = Math.max(minSize, Math.round(startSize));
-  ctx.font = `700 ${size}px ${FONT_STACK}`;
-  while (size > minSize && ctx.measureText(text).width > maxWidth) {
-    size -= 1;
-    ctx.font = `700 ${size}px ${FONT_STACK}`;
+  const drawSize = size * 0.94;
+  const offset = (size - drawSize) / 2;
+  octx.fillStyle = "#000000";
+  heartPath(octx, size / 2, offset, drawSize);
+  octx.fill();
+
+  const frame = octx.getImageData(0, 0, size, size);
+  const px = frame.data;
+  for (let i = 0, p = 0; i < px.length; i += 4, p++) {
+    inside[p] = px[i + 3]! > 128 ? 1 : 0;
   }
-  return size;
+  return inside;
 }
 
-function truncateForWidth(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
-  if (ctx.measureText(text).width <= maxWidth) return text;
-  let t = text;
-  while (t.length > 1 && ctx.measureText(`${t}…`).width > maxWidth) t = t.slice(0, -1);
-  return t.length < text.length ? `${t}…` : t;
+/** Paints the wordcloud2 "free space" trick (inside vs. near-identical outside colour). */
+function paintInsideBackground(canvas: HTMLCanvasElement, inside: Uint8Array, background: string) {
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return;
+  const [br, bg, bb] = hexToRgb(background);
+  const nr = br > 8 ? br - 4 : br + 4;
+  const ng = bg > 8 ? bg - 4 : bg + 4;
+  const nb = bb > 8 ? bb - 4 : bb + 4;
+
+  const frame = ctx.createImageData(canvas.width, canvas.height);
+  const px = frame.data;
+  for (let p = 0, i = 0; p < inside.length; p++, i += 4) {
+    const isIn = inside[p] === 1;
+    px[i] = isIn ? br : nr;
+    px[i + 1] = isIn ? bg : ng;
+    px[i + 2] = isIn ? bb : nb;
+    px[i + 3] = 255;
+  }
+  ctx.putImageData(frame, 0, 0);
 }
+
+function shadeColor(hex: string): string {
+  const [r, g, b] = hexToRgb(hex);
+  const delta = (Math.random() - 0.5) * 40;
+  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v + delta)));
+  return `rgb(${clamp(r)}, ${clamp(g)}, ${clamp(b)})`;
+}
+
+type WordCloudFn = (el: HTMLElement, options: Record<string, unknown>) => void;
+let wordCloudPromise: Promise<WordCloudFn> | null = null;
+async function getWordCloud(): Promise<WordCloudFn> {
+  if (!wordCloudPromise) {
+    wordCloudPromise = import("wordcloud").then((mod) => (mod.default ?? mod) as WordCloudFn);
+  }
+  return wordCloudPromise;
+}
+
+/** Fills the mini canvas entirely with repeats of a single word at shrinking sizes. */
+function runMiniHeartCloud(
+  canvas: HTMLCanvasElement,
+  WordCloud: WordCloudFn,
+  word: string,
+  weight: number,
+  color: string,
+): Promise<void> {
+  const ratios = [1, 0.76, 0.58, 0.44, 0.34, 0.26, 0.2, 0.15, 0.11];
+  const list: [string, number][] = ratios.map((r) => [word, Math.max(1, weight * r)]);
+
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      canvas.removeEventListener("wordcloudstop", finish);
+      resolve();
+    };
+    canvas.addEventListener("wordcloudstop", finish, { once: true });
+    WordCloud(canvas, {
+      list,
+      gridSize: Math.max(2, Math.round(canvas.width / 90)),
+      weightFactor: (w: number) => Math.max(6, Math.sqrt(w / list[0]![1]) * canvas.width * 0.4),
+      fontFamily: FONT_STACK,
+      fontWeight: "700",
+      color: () => shadeColor(color),
+      clearCanvas: false,
+      rotateRatio: 0.25,
+      rotationSteps: 2,
+      minRotation: -Math.PI / 10,
+      maxRotation: Math.PI / 10,
+      shrinkToFit: true,
+      drawOutOfBound: false,
+    });
+    // Safety net in case wordcloudstop never fires (e.g. a zero-size canvas).
+    setTimeout(finish, 900);
+  });
+}
+
+type PlacedHeart = { word: string; weight: number; x: number; y: number; size: number };
 
 let renderToken = 0;
 
-type Entry = [string, number];
-
-type LayoutResult = { placed: (PlacedHeart & { word: string; size: number })[]; unplacedCount: number };
-
-/** Dry-run placement pass at a given size scale — no drawing, just geometry. */
-function computeLayout(
-  entries: Entry[],
-  sizeFor: (weight: number) => number,
-  scale: number,
-  isInside: (x: number, y: number) => boolean,
-  hasMask: boolean,
-  bounds: { minX: number; minY: number; maxX: number; maxY: number; width: number; height: number },
-): LayoutResult {
-  const { minX, minY, maxX, maxY, width, height } = bounds;
-  const spanX = Math.max(1, maxX - minX);
-  const spanY = Math.max(1, maxY - minY);
-  const placed: (PlacedHeart & { word: string; size: number })[] = [];
-  let unplacedCount = 0;
-
-  for (const [word, weight] of entries) {
-    const size = sizeFor(weight) * scale;
-    const radius = size * 0.58;
-    let ok = false;
-
-    for (let attempt = 0; attempt < 60 && !ok; attempt++) {
-      const cx = minX + radius + Math.random() * Math.max(1, spanX - radius * 2);
-      const cy = minY + radius + Math.random() * Math.max(1, spanY - radius * 2);
-
-      if (hasMask) {
-        const pad = radius * 0.85;
-        const corners: [number, number][] = [
-          [cx, cy],
-          [cx - pad, cy],
-          [cx + pad, cy],
-          [cx, cy - pad],
-          [cx, cy + pad],
-        ];
-        if (!corners.every(([px, py]) => isInside(px, py))) continue;
-      } else if (cx - radius < 0 || cx + radius > width || cy - radius < 0 || cy + radius > height) {
-        continue;
-      }
-
-      const collides = placed.some((h) => {
-        const dx = h.x - cx;
-        const dy = h.y - cy;
-        return Math.hypot(dx, dy) < (h.r + radius) * 0.86;
-      });
-      if (collides) continue;
-
-      placed.push({ word, x: cx, y: cy, r: radius, size });
-      ok = true;
-    }
-    if (!ok) unplacedCount++;
-  }
-
-  return { placed, unplacedCount };
-}
-
 /**
- * Renders each word as its own heart (sized by how often it was submitted),
- * scattered without overlap inside the mask shape (or the whole canvas when
- * there's no mask). When there isn't room for everyone, all hearts shrink
- * together and the layout is retried — same "shrink to fit" idea as the
- * classic text cloud — rather than silently dropping the newest words.
+ * Renders each distinct word as its own heart-shaped mini word-cloud — the
+ * heart's outline is formed purely by that single word repeated at shrinking
+ * sizes (no coloured heart card underneath), sized overall by how often the
+ * word was submitted. Hearts scatter without overlap inside the uploaded
+ * shape mask (or the whole canvas without one). When there isn't room for
+ * everyone, all hearts shrink together and placement is retried, same as the
+ * classic text cloud's shrink-to-fit behaviour.
  */
 export async function renderHeartCloud({
   canvas,
   counts,
   palette,
   mask,
-  maxHearts = 140,
+  maxHearts = 40,
 }: HeartCloudOptions): Promise<void> {
   const token = ++renderToken;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -148,27 +175,25 @@ export async function renderHeartCloud({
   ctx.fillStyle = palette.background;
   ctx.fillRect(0, 0, width, height);
 
-  let inside: Uint8Array | null = null;
+  let outerInside: Uint8Array | null = null;
   if (mask) {
     try {
       const img = await loadMaskImage(mask.dataUrl);
       if (token !== renderToken) return;
-      inside = computeMaskInsideMap(img, width, height);
-      // Paint the same background-blend trick as the classic mode, so the
-      // shape outline reads the same way whichever mode is active.
+      outerInside = computeMaskInsideMap(img, width, height);
       await paintMaskBackground(canvas, mask.dataUrl, palette.background);
       if (token !== renderToken) return;
     } catch {
-      inside = null;
+      outerInside = null;
     }
   }
 
-  const isInside = (x: number, y: number): boolean => {
-    if (!inside) return x >= 0 && x < width && y >= 0 && y < height;
+  const isOuterInside = (x: number, y: number): boolean => {
+    if (!outerInside) return x >= 0 && x < width && y >= 0 && y < height;
     const xi = Math.round(x);
     const yi = Math.round(y);
     if (xi < 0 || xi >= width || yi < 0 || yi >= height) return false;
-    return inside[yi * width + xi] === 1;
+    return outerInside[yi * width + xi] === 1;
   };
 
   // Bounding box of usable space, so random placement doesn't waste attempts
@@ -177,7 +202,7 @@ export async function renderHeartCloud({
   let minY = 0;
   let maxX = width;
   let maxY = height;
-  if (inside) {
+  if (outerInside) {
     minX = width;
     minY = height;
     maxX = 0;
@@ -185,7 +210,7 @@ export async function renderHeartCloud({
     const step = 4;
     for (let y = 0; y < height; y += step) {
       for (let x = 0; x < width; x += step) {
-        if (inside[y * width + x] === 1) {
+        if (outerInside[y * width + x] === 1) {
           if (x < minX) minX = x;
           if (x > maxX) maxX = x;
           if (y < minY) minY = y;
@@ -203,51 +228,95 @@ export async function renderHeartCloud({
 
   const entries = Object.entries(counts)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, maxHearts) as Entry[];
+    .slice(0, maxHearts);
   if (entries.length === 0) return;
 
-  const max = entries[0]![1];
+  const maxWeight = entries[0]![1];
   const base = Math.min(width, height);
   const sizeFor = (weight: number) => {
-    const ratio = Math.sqrt(weight / max);
-    return Math.max(base * 0.05, Math.min(base * 0.17, ratio * base * 0.15));
+    const ratio = Math.sqrt(weight / maxWeight);
+    return Math.max(base * 0.09, Math.min(base * 0.32, ratio * base * 0.3));
   };
 
-  const bounds = { minX, minY, maxX, maxY, width, height };
+  const spanX = Math.max(1, maxX - minX);
+  const spanY = Math.max(1, maxY - minY);
+  const hasMask = Boolean(outerInside);
 
-  // Shrink-to-fit: if not everyone fits at full size, scale every heart down
-  // together and retry the whole layout, same as the classic cloud does.
+  // Shrink-to-fit: find non-overlapping positions for every heart; if some
+  // don't fit, shrink everyone and retry the whole layout from scratch.
+  const tryLayout = (scale: number): { placed: PlacedHeart[]; unplacedCount: number } => {
+    const placed: PlacedHeart[] = [];
+    let unplacedCount = 0;
+    for (const [word, weight] of entries) {
+      const size = sizeFor(weight) * scale;
+      const radius = size * 0.58;
+      let ok = false;
+      for (let attempt = 0; attempt < 60 && !ok; attempt++) {
+        const cx = minX + radius + Math.random() * Math.max(1, spanX - radius * 2);
+        const cy = minY + radius + Math.random() * Math.max(1, spanY - radius * 2);
+
+        if (hasMask) {
+          const pad = radius * 0.85;
+          const corners: [number, number][] = [
+            [cx, cy],
+            [cx - pad, cy],
+            [cx + pad, cy],
+            [cx, cy - pad],
+            [cx, cy + pad],
+          ];
+          if (!corners.every(([px, py]) => isOuterInside(px, py))) continue;
+        } else if (
+          cx - radius < 0 ||
+          cx + radius > width ||
+          cy - radius < 0 ||
+          cy + radius > height
+        ) {
+          continue;
+        }
+
+        const collides = placed.some((h) => {
+          const dx = h.x - cx;
+          const dy = h.y - cy;
+          return Math.hypot(dx, dy) < (h.size * 0.58 + radius) * 0.9;
+        });
+        if (collides) continue;
+
+        placed.push({ word, weight, x: cx, y: cy, size });
+        ok = true;
+      }
+      if (!ok) unplacedCount++;
+    }
+    return { placed, unplacedCount };
+  };
+
   let scale = 1;
-  let layout = computeLayout(entries, sizeFor, scale, isInside, Boolean(inside), bounds);
+  let layout = tryLayout(scale);
   let iterations = 0;
-  while (layout.unplacedCount > 0 && scale > 0.3 && iterations < 8) {
+  while (layout.unplacedCount > 0 && scale > 0.3 && iterations < 6) {
     scale *= 0.85;
-    layout = computeLayout(entries, sizeFor, scale, isInside, Boolean(inside), bounds);
+    layout = tryLayout(scale);
     iterations++;
   }
 
-  const heartColor = "#e11d2e";
-  const textColor = "#ffffff";
+  const WordCloud = await getWordCloud();
+  if (token !== renderToken) return;
 
-  for (const h of layout.placed) {
-    ctx.save();
-    ctx.fillStyle = heartColor;
-    heartPath(ctx, h.x, h.y - h.size / 2, h.size);
-    ctx.fill();
-    ctx.restore();
+  for (let i = 0; i < layout.placed.length; i++) {
+    const h = layout.placed[i]!;
+    const cellSize = Math.max(24, Math.round(h.size));
+    const off = document.createElement("canvas");
+    off.width = cellSize;
+    off.height = cellSize;
+    const inside = heartInsideMap(cellSize);
+    paintInsideBackground(off, inside, palette.background);
 
-    ctx.save();
-    ctx.fillStyle = textColor;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    const maxTextWidth = h.size * 0.72;
-    const fitted = fitFontSize(ctx, h.word, maxTextWidth, h.size * 0.26);
-    ctx.font = `700 ${fitted}px ${FONT_STACK}`;
-    const label = truncateForWidth(ctx, h.word, maxTextWidth);
-    ctx.fillText(label, h.x, h.y - h.size * 0.12);
-    ctx.restore();
+    const color = REDS[i % REDS.length]!;
+    await runMiniHeartCloud(off, WordCloud, h.word, h.weight, color);
+    if (token !== renderToken) return;
+
+    ctx.drawImage(off, h.x - cellSize / 2, h.y - cellSize / 2, cellSize, cellSize);
   }
-  // Anything still unplaced after the minimum scale is reached is silently
-  // dropped (lowest-frequency words first, since entries are sorted by
-  // weight) — an extreme edge case only hit when the mask area is tiny.
+  // Words that never found room after the minimum scale are silently
+  // dropped (lowest-frequency first, since entries are sorted by weight) —
+  // an extreme edge case only hit when the mask area is tiny.
 }

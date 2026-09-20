@@ -2,7 +2,7 @@ import type { Palette } from "./wordcloud-core";
 
 export type MaskSource = { dataUrl: string } | null;
 
-function hexToRgb(hex: string): [number, number, number] {
+export function hexToRgb(hex: string): [number, number, number] {
   const clean = hex.replace("#", "");
   const full =
     clean.length === 3
