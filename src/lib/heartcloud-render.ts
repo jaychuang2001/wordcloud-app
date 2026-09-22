@@ -1,13 +1,8 @@
 import type { Palette } from "./wordcloud-core";
-import {
-  computeMaskInsideMap,
-  hexToRgb,
-  loadMaskImage,
-  paintMaskBackground,
-} from "./wordcloud-render";
-import type { MaskSource } from "./wordcloud-render";
+import { computeMaskInsideMap, loadMaskImage, paintMaskBackground } from "./wordcloud-render";
+import type { ExcludeRect, MaskSource } from "./wordcloud-render";
 
-export type { MaskSource };
+export type { ExcludeRect, MaskSource };
 
 export type HeartCloudOptions = {
   canvas: HTMLCanvasElement;
@@ -15,28 +10,63 @@ export type HeartCloudOptions = {
   palette: Palette;
   mask: MaskSource;
   maxHearts?: number;
+  /** UI overlays (title block, QR code, ...) that shapes must not be drawn under. */
+  excludeRects?: ExcludeRect[];
 };
 
 const FONT_STACK = '"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif';
-const REDS = ["#c81e1e", "#e11d2e", "#b91c1c", "#ef4444", "#991b1b", "#f43f5e", "#dc2626"];
+// One glow-colour palette per shape, so hearts/stars/clouds read as distinct
+// families at a glance.
+const HEART_COLORS = ["#ff2d55", "#ff5470", "#ff3b3b", "#ff6b81", "#ff1744", "#ff477e"];
+const STAR_COLORS = ["#ffd60a", "#ffe066", "#ffc300", "#ffdd57", "#ffb703"];
+const CLOUD_COLORS = ["#4cc9f0", "#48bfe3", "#5390d9", "#4ea8de", "#56cfe1"];
 
-/** A classic ❤ outline, centered horizontally at cx, spanning [cyTop, cyTop+size] vertically. */
+type ShapeKind = "heart" | "star" | "cloud";
+const SHAPE_KINDS: ShapeKind[] = ["heart", "star", "cloud"];
+
+// Each word gets a genuinely random shape the first time it's seen, then
+// keeps that shape for as long as it keeps appearing — so a word "grows"
+// as one consistent shape rather than jumping between shapes on redraw.
+const wordShapeCache = new Map<string, ShapeKind>();
+
+function shapeForWord(word: string): ShapeKind {
+  let shape = wordShapeCache.get(word);
+  if (!shape) {
+    shape = SHAPE_KINDS[Math.floor(Math.random() * SHAPE_KINDS.length)]!;
+    wordShapeCache.set(word, shape);
+  }
+  return shape;
+}
+
+function colorsForShape(shape: ShapeKind): string[] {
+  if (shape === "star") return STAR_COLORS;
+  if (shape === "cloud") return CLOUD_COLORS;
+  return HEART_COLORS;
+}
+
+/**
+ * A plump ❤ outline (softened tip, not a sharp point), centered horizontally
+ * at cx, spanning [cyTop, cyTop+size] vertically.
+ */
 function heartPath(ctx: CanvasRenderingContext2D, cx: number, cyTop: number, size: number) {
-  const top = size * 0.3;
+  const top = size * 0.32;
+  const bottomY = cyTop + size;
+  const tip = size * 0.05;
   ctx.beginPath();
   ctx.moveTo(cx, cyTop + top);
   ctx.bezierCurveTo(cx, cyTop, cx - size / 2, cyTop, cx - size / 2, cyTop + top);
   ctx.bezierCurveTo(
     cx - size / 2,
     cyTop + (size + top) / 2,
-    cx,
-    cyTop + (size + top) / 2,
-    cx,
-    cyTop + size,
+    cx - tip,
+    bottomY - tip * 1.4,
+    cx - tip * 0.3,
+    bottomY - tip * 0.3,
   );
+  ctx.quadraticCurveTo(cx, bottomY, cx + tip * 0.3, bottomY - tip * 0.3);
   ctx.bezierCurveTo(
-    cx,
-    cyTop + (size + top) / 2,
+    cx + tip,
+    bottomY - tip * 1.4,
     cx + size / 2,
     cyTop + (size + top) / 2,
     cx + size / 2,
@@ -46,106 +76,109 @@ function heartPath(ctx: CanvasRenderingContext2D, cx: number, cyTop: number, siz
   ctx.closePath();
 }
 
-/** Synchronous, vector-drawn heart occupancy map for a square canvas of `size` px. */
-function heartInsideMap(size: number): Uint8Array {
-  const off = document.createElement("canvas");
-  off.width = size;
-  off.height = size;
-  const octx = off.getContext("2d", { willReadFrequently: true });
-  const inside = new Uint8Array(size * size);
-  if (!octx) return inside;
-
-  const drawSize = size * 0.94;
-  const offset = (size - drawSize) / 2;
-  octx.fillStyle = "#000000";
-  heartPath(octx, size / 2, offset, drawSize);
-  octx.fill();
-
-  const frame = octx.getImageData(0, 0, size, size);
-  const px = frame.data;
-  for (let i = 0, p = 0; i < px.length; i += 4, p++) {
-    inside[p] = px[i + 3]! > 128 ? 1 : 0;
+/** A soft, rounded 5-point star (edges are smoothed, not sharp spikes). */
+function starPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number) {
+  const outerR = size / 2;
+  const innerR = outerR * 0.44;
+  const points = 5;
+  const verts: [number, number][] = [];
+  for (let i = 0; i < points * 2; i++) {
+    const r = i % 2 === 0 ? outerR : innerR;
+    const angle = (Math.PI / points) * i - Math.PI / 2;
+    verts.push([cx + r * Math.cos(angle), cy + r * Math.sin(angle)]);
   }
-  return inside;
-}
-
-/** Paints the wordcloud2 "free space" trick (inside vs. near-identical outside colour). */
-function paintInsideBackground(canvas: HTMLCanvasElement, inside: Uint8Array, background: string) {
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return;
-  const [br, bg, bb] = hexToRgb(background);
-  const nr = br > 8 ? br - 4 : br + 4;
-  const ng = bg > 8 ? bg - 4 : bg + 4;
-  const nb = bb > 8 ? bb - 4 : bb + 4;
-
-  const frame = ctx.createImageData(canvas.width, canvas.height);
-  const px = frame.data;
-  for (let p = 0, i = 0; p < inside.length; p++, i += 4) {
-    const isIn = inside[p] === 1;
-    px[i] = isIn ? br : nr;
-    px[i + 1] = isIn ? bg : ng;
-    px[i + 2] = isIn ? bb : nb;
-    px[i + 3] = 255;
+  const mid = (a: [number, number], b: [number, number]): [number, number] => [
+    (a[0] + b[0]) / 2,
+    (a[1] + b[1]) / 2,
+  ];
+  const n = verts.length;
+  const start = mid(verts[n - 1]!, verts[0]!);
+  ctx.beginPath();
+  ctx.moveTo(start[0], start[1]);
+  for (let i = 0; i < n; i++) {
+    const next = verts[(i + 1) % n]!;
+    const m = mid(verts[i]!, next);
+    ctx.quadraticCurveTo(verts[i]![0], verts[i]![1], m[0], m[1]);
   }
-  ctx.putImageData(frame, 0, 0);
+  ctx.closePath();
 }
 
-function shadeColor(hex: string): string {
-  const [r, g, b] = hexToRgb(hex);
-  const delta = (Math.random() - 0.5) * 40;
-  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v + delta)));
-  return `rgb(${clamp(r)}, ${clamp(g)}, ${clamp(b)})`;
+/** A fluffy, rounded cloud outline (several overlapping bumps on top). */
+function cloudPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number) {
+  const s = size / 70;
+  const x = cx - 25 * s;
+  const y = cy - 10 * s;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.bezierCurveTo(x - 10 * s, y + 5 * s, x - 10 * s, y + 15 * s, x, y + 20 * s);
+  ctx.bezierCurveTo(x - 5 * s, y + 30 * s, x + 10 * s, y + 35 * s, x + 20 * s, y + 30 * s);
+  ctx.bezierCurveTo(x + 30 * s, y + 40 * s, x + 50 * s, y + 30 * s, x + 45 * s, y + 15 * s);
+  ctx.bezierCurveTo(x + 60 * s, y + 15 * s, x + 60 * s, y - 5 * s, x + 45 * s, y - 8 * s);
+  ctx.bezierCurveTo(x + 45 * s, y - 20 * s, x + 25 * s, y - 20 * s, x + 20 * s, y - 8 * s);
+  ctx.bezierCurveTo(x + 10 * s, y - 15 * s, x - 5 * s, y - 8 * s, x, y);
+  ctx.closePath();
 }
 
-type WordCloudFn = (el: HTMLElement, options: Record<string, unknown>) => void;
-let wordCloudPromise: Promise<WordCloudFn> | null = null;
-async function getWordCloud(): Promise<WordCloudFn> {
-  if (!wordCloudPromise) {
-    wordCloudPromise = import("wordcloud").then((mod) => (mod.default ?? mod) as WordCloudFn);
-  }
-  return wordCloudPromise;
+function drawShapePath(ctx: CanvasRenderingContext2D, shape: ShapeKind, cx: number, cy: number, size: number) {
+  if (shape === "star") starPath(ctx, cx, cy, size);
+  else if (shape === "cloud") cloudPath(ctx, cx, cy, size);
+  else heartPath(ctx, cx, cy - size / 2, size);
 }
 
-/** Fills the mini canvas entirely with repeats of a single word at shrinking sizes. */
-function runMiniHeartCloud(
-  canvas: HTMLCanvasElement,
-  WordCloud: WordCloudFn,
-  word: string,
-  weight: number,
+/** Draws just the shape's outline with a soft neon glow (no fill). */
+function drawGlowingShape(
+  ctx: CanvasRenderingContext2D,
+  shape: ShapeKind,
+  cx: number,
+  cy: number,
+  size: number,
   color: string,
-  background: string,
-): Promise<void> {
-  const ratios = [1, 0.76, 0.58, 0.44, 0.34, 0.26, 0.2, 0.15, 0.11];
-  const list: [string, number][] = ratios.map((r) => [word, Math.max(1, weight * r)]);
+) {
+  // Wide, soft glow pass underneath.
+  ctx.save();
+  ctx.shadowColor = color;
+  ctx.shadowBlur = size * 0.22;
+  ctx.strokeStyle = color;
+  ctx.globalAlpha = 0.55;
+  ctx.lineWidth = Math.max(2, size * 0.05);
+  ctx.lineJoin = "round";
+  drawShapePath(ctx, shape, cx, cy, size);
+  ctx.stroke();
+  ctx.restore();
 
-  return new Promise((resolve) => {
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      canvas.removeEventListener("wordcloudstop", finish);
-      resolve();
-    };
-    canvas.addEventListener("wordcloudstop", finish, { once: true });
-    WordCloud(canvas, {
-      list,
-      gridSize: Math.max(2, Math.round(canvas.width / 90)),
-      weightFactor: (w: number) => Math.max(6, Math.sqrt(w / list[0]![1]) * canvas.width * 0.4),
-      fontFamily: FONT_STACK,
-      fontWeight: "700",
-      color: () => shadeColor(color),
-      backgroundColor: background,
-      clearCanvas: false,
-      rotateRatio: 0.25,
-      rotationSteps: 2,
-      minRotation: -Math.PI / 10,
-      maxRotation: Math.PI / 10,
-      shrinkToFit: true,
-      drawOutOfBound: false,
-    });
-    // Safety net in case wordcloudstop never fires (e.g. a zero-size canvas).
-    setTimeout(finish, 900);
-  });
+  // Crisp inner line on top for a defined edge.
+  ctx.save();
+  ctx.shadowColor = color;
+  ctx.shadowBlur = size * 0.1;
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = Math.max(1.5, size * 0.022);
+  ctx.lineJoin = "round";
+  drawShapePath(ctx, shape, cx, cy, size);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function fitFontSize(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  startSize: number,
+  minSize = 9,
+): number {
+  let size = Math.max(minSize, Math.round(startSize));
+  ctx.font = `700 ${size}px ${FONT_STACK}`;
+  while (size > minSize && ctx.measureText(text).width > maxWidth) {
+    size -= 1;
+    ctx.font = `700 ${size}px ${FONT_STACK}`;
+  }
+  return size;
+}
+
+function truncateForWidth(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let t = text;
+  while (t.length > 1 && ctx.measureText(`${t}…`).width > maxWidth) t = t.slice(0, -1);
+  return t.length < text.length ? `${t}…` : t;
 }
 
 type PlacedHeart = { word: string; weight: number; x: number; y: number; size: number };
@@ -153,20 +186,23 @@ type PlacedHeart = { word: string; weight: number; x: number; y: number; size: n
 let renderToken = 0;
 
 /**
- * Renders each distinct word as its own heart-shaped mini word-cloud — the
- * heart's outline is formed purely by that single word repeated at shrinking
- * sizes (no coloured heart card underneath), sized overall by how often the
- * word was submitted. Hearts scatter without overlap inside the uploaded
- * shape mask (or the whole canvas without one). When there isn't room for
- * everyone, all hearts shrink together and placement is retried, same as the
- * classic text cloud's shrink-to-fit behaviour.
+ * Renders each distinct word as its own glowing heart outline (no fill),
+ * with the word centered inside, sized by how often it was submitted.
+ * Hearts scatter without overlap inside the uploaded shape mask (or the
+ * whole canvas without one). When there isn't room for everyone, all hearts
+ * shrink together and placement is retried, same as the classic text
+ * cloud's shrink-to-fit behaviour.
+ *
+ * Fully synchronous placement — no external layout library, no waiting on
+ * events or timers — so a redraw always finishes in one tick.
  */
 export async function renderHeartCloud({
   canvas,
   counts,
   palette,
   mask,
-  maxHearts = 40,
+  maxHearts = 60,
+  excludeRects,
 }: HeartCloudOptions): Promise<void> {
   const token = ++renderToken;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -187,6 +223,19 @@ export async function renderHeartCloud({
       if (token !== renderToken) return;
     } catch {
       outerInside = null;
+    }
+  }
+
+  if (excludeRects && excludeRects.length > 0) {
+    if (!outerInside) outerInside = new Uint8Array(width * height).fill(1);
+    for (const r of excludeRects) {
+      const x0 = Math.max(0, Math.floor(r.x));
+      const y0 = Math.max(0, Math.floor(r.y));
+      const x1 = Math.min(width, Math.ceil(r.x + r.width));
+      const y1 = Math.min(height, Math.ceil(r.y + r.height));
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) outerInside[y * width + x] = 0;
+      }
     }
   }
 
@@ -233,11 +282,17 @@ export async function renderHeartCloud({
     .slice(0, maxHearts);
   if (entries.length === 0) return;
 
+  // Forget shapes for words no longer tracked at all, so this cache doesn't
+  // grow unbounded over a long-running event.
+  for (const key of wordShapeCache.keys()) {
+    if (!(key in counts)) wordShapeCache.delete(key);
+  }
+
   const maxWeight = entries[0]![1];
   const base = Math.min(width, height);
   const sizeFor = (weight: number) => {
     const ratio = Math.sqrt(weight / maxWeight);
-    return Math.max(base * 0.09, Math.min(base * 0.32, ratio * base * 0.3));
+    return Math.max(base * 0.06, Math.min(base * 0.2, ratio * base * 0.18));
   };
 
   const spanX = Math.max(1, maxX - minX);
@@ -279,7 +334,7 @@ export async function renderHeartCloud({
         const collides = placed.some((h) => {
           const dx = h.x - cx;
           const dy = h.y - cy;
-          return Math.hypot(dx, dy) < (h.size * 0.58 + radius) * 0.9;
+          return Math.hypot(dx, dy) < (h.size * 0.58 + radius) * 0.92;
         });
         if (collides) continue;
 
@@ -300,23 +355,25 @@ export async function renderHeartCloud({
     iterations++;
   }
 
-  const WordCloud = await getWordCloud();
-  if (token !== renderToken) return;
-
   for (let i = 0; i < layout.placed.length; i++) {
     const h = layout.placed[i]!;
-    const cellSize = Math.max(24, Math.round(h.size));
-    const off = document.createElement("canvas");
-    off.width = cellSize;
-    off.height = cellSize;
-    const inside = heartInsideMap(cellSize);
-    paintInsideBackground(off, inside, palette.background);
+    const shape = shapeForWord(h.word);
+    const colorSet = colorsForShape(shape);
+    const color = colorSet[i % colorSet.length]!;
 
-    const color = REDS[i % REDS.length]!;
-    await runMiniHeartCloud(off, WordCloud, h.word, h.weight, color, palette.background);
-    if (token !== renderToken) return;
+    drawGlowingShape(ctx, shape, h.x, h.y, h.size, color);
 
-    ctx.drawImage(off, h.x - cellSize / 2, h.y - cellSize / 2, cellSize, cellSize);
+    ctx.save();
+    ctx.shadowColor = "transparent";
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const maxTextWidth = h.size * 0.68;
+    const fitted = fitFontSize(ctx, h.word, maxTextWidth, h.size * 0.24);
+    ctx.font = `700 ${fitted}px ${FONT_STACK}`;
+    const label = truncateForWidth(ctx, h.word, maxTextWidth);
+    ctx.fillText(label, h.x, h.y - h.size * 0.1);
+    ctx.restore();
   }
   // Words that never found room after the minimum scale are silently
   // dropped (lowest-frequency first, since entries are sorted by weight) —

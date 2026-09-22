@@ -9,9 +9,7 @@ import {
   loadBlocklist,
   MAX_WORD_LENGTH,
   normalizeWord,
-  TOPIC_IDS,
   topicsFromSearch,
-  type TopicId,
 } from "@/lib/wordcloud-core";
 
 const COOLDOWN_SECONDS = 10;
@@ -44,30 +42,32 @@ function JoinRoute() {
 function JoinPage() {
   const { client, status, error } = useAbly();
   const [search, setSearch] = useState<URLSearchParams>(() => new URLSearchParams());
-  const [active, setActive] = useState<TopicId>("1");
+  const [active, setActive] = useState<string>("");
   const [words, setWords] = useState(["", "", ""]);
   const [message, setMessage] = useState("");
   const [sent, setSent] = useState(false);
-  const [cooldowns, setCooldowns] = useState<Record<TopicId, number>>({ "1": 0, "2": 0, "3": 0 });
+  const [cooldowns, setCooldowns] = useState<Record<string, number>>({});
   const blocklist = useRef<string[]>([]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setSearch(params);
+    const initialTopics = topicsFromSearch(params);
     const t = params.get("topic");
-    if (t && TOPIC_IDS.includes(t as TopicId)) setActive(t as TopicId);
+    const initialActive =
+      t && initialTopics.some((topic) => topic.id === t) ? t : (initialTopics[0]?.id ?? "");
+    setActive(initialActive);
     blocklist.current = loadBlocklist();
   }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
       setCooldowns((prev) => {
-        if (!prev["1"] && !prev["2"] && !prev["3"]) return prev;
-        return {
-          "1": Math.max(0, prev["1"] - 1),
-          "2": Math.max(0, prev["2"] - 1),
-          "3": Math.max(0, prev["3"] - 1),
-        };
+        const keys = Object.keys(prev);
+        if (keys.every((k) => !prev[k])) return prev;
+        const next: Record<string, number> = {};
+        for (const k of keys) next[k] = Math.max(0, (prev[k] ?? 0) - 1);
+        return next;
       });
     }, 1000);
     return () => window.clearInterval(timer);
@@ -75,8 +75,8 @@ function JoinPage() {
 
   const room = search.get("room") || DEFAULT_ROOM;
   const topics = useMemo(() => topicsFromSearch(search), [search]);
-  const activeTopic = topics.find((t) => t.id === active)!;
-  const cooling = cooldowns[active] > 0;
+  const activeTopic = topics.find((t) => t.id === active) ?? topics[0];
+  const cooling = (cooldowns[active] ?? 0) > 0;
 
   const statusText =
     status === "connected"
@@ -139,7 +139,7 @@ function JoinPage() {
         <h1 className="mt-4 text-2xl font-black text-foreground">送出你的想法</h1>
         <p className="mt-1 text-sm text-muted-foreground">選擇主題，輸入 1～3 個詞彙。</p>
 
-        <div className="mt-5 grid grid-cols-3 gap-2 rounded-2xl border border-border bg-card p-1.5">
+        <div className="mt-5 flex flex-wrap gap-2 rounded-2xl border border-border bg-card p-1.5">
           {topics.map((t) => (
             <button
               key={t.id}
@@ -148,7 +148,7 @@ function JoinPage() {
                 setMessage("");
               }}
               className={
-                "truncate rounded-xl px-2 py-2.5 text-sm font-semibold transition " +
+                "min-w-[88px] flex-1 truncate rounded-xl px-2 py-2.5 text-sm font-semibold transition " +
                 (active === t.id
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground hover:bg-secondary")
@@ -160,7 +160,7 @@ function JoinPage() {
         </div>
 
         <section className="mt-5 rounded-2xl border border-border bg-card p-5">
-          <p className="text-sm font-semibold text-foreground">目前主題：{activeTopic.name}</p>
+          <p className="text-sm font-semibold text-foreground">目前主題：{activeTopic?.name ?? ""}</p>
           <div className="mt-4 space-y-3">
             {words.map((w, i) => (
               <input
@@ -193,7 +193,7 @@ function JoinPage() {
                   (sent ? "scale-[1.02]" : ""))
             }
           >
-            {cooling ? `冷卻中 ${cooldowns[active]} 秒` : "送出"}
+            {cooling ? `冷卻中 ${cooldowns[active] ?? 0} 秒` : "送出"}
           </button>
 
           {message ? (

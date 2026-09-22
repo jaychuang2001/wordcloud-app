@@ -1,6 +1,7 @@
 import type { Palette } from "./wordcloud-core";
 
 export type MaskSource = { dataUrl: string } | null;
+export type ExcludeRect = { x: number; y: number; width: number; height: number };
 
 export function hexToRgb(hex: string): [number, number, number] {
   const clean = hex.replace("#", "");
@@ -102,7 +103,28 @@ export type RenderOptions = {
   mask: MaskSource;
   rotate: boolean;
   maxWords?: number;
+  /** UI overlays (title block, QR code, ...) that words must not be drawn under. */
+  excludeRects?: ExcludeRect[];
 };
+
+/** Marks rectangles as blocked using the same near-identical-shade trick as the mask. */
+function paintExclusionRects(
+  canvas: HTMLCanvasElement,
+  rects: ExcludeRect[] | undefined,
+  background: string,
+): void {
+  if (!rects || rects.length === 0) return;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return;
+  const [br, bg, bb] = hexToRgb(background);
+  const nr = br > 8 ? br - 4 : br + 4;
+  const ng = bg > 8 ? bg - 4 : bg + 4;
+  const nb = bb > 8 ? bb - 4 : bb + 4;
+  ctx.fillStyle = `rgb(${nr}, ${ng}, ${nb})`;
+  for (const r of rects) {
+    ctx.fillRect(r.x, r.y, r.width, r.height);
+  }
+}
 
 let renderToken = 0;
 
@@ -113,6 +135,7 @@ export async function renderWordCloud({
   mask,
   rotate,
   maxWords = 220,
+  excludeRects,
 }: RenderOptions): Promise<void> {
   const token = ++renderToken;
   const WordCloudModule = await import("wordcloud");
@@ -150,6 +173,7 @@ export async function renderWordCloud({
     ctx.fillStyle = palette.background;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
+  paintExclusionRects(canvas, excludeRects, palette.background);
 
   let colorIndex = 0;
   const originalFillText = ctx.fillText.bind(ctx);
@@ -180,7 +204,7 @@ export async function renderWordCloud({
     fontWeight: "700",
     color: () => palette.colors[colorIndex++ % palette.colors.length]!,
     backgroundColor: palette.background,
-    clearCanvas: !mask,
+    clearCanvas: false,
     rotateRatio: rotate ? 0.35 : 0,
     rotationSteps: 2,
     minRotation: -Math.PI / 12,

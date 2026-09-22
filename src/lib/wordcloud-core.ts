@@ -1,9 +1,20 @@
 // Shared, browser-safe helpers for the live word cloud app.
 
-export type TopicId = "1" | "2" | "3";
-export const TOPIC_IDS: TopicId[] = ["1", "2", "3"];
+export type TopicId = string;
+export const MIN_TOPICS = 1;
+export const MAX_TOPICS = 12;
 
 export type TopicConfig = { id: TopicId; name: string };
+
+/** Smallest unused topic number, so newly added topics keep tidy, short ids like "4", "5"… */
+export function nextTopicId(existing: TopicConfig[]): string {
+  let max = 0;
+  for (const t of existing) {
+    const n = Number(t.id);
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return String(max + 1);
+}
 
 export type RoomConfig = {
   room: string;
@@ -34,7 +45,9 @@ export function loadConfig(): RoomConfig {
     return {
       room: parsed.room || DEFAULT_ROOM,
       topics:
-        Array.isArray(parsed.topics) && parsed.topics.length === 3
+        Array.isArray(parsed.topics) &&
+        parsed.topics.length >= MIN_TOPICS &&
+        parsed.topics.length <= MAX_TOPICS
           ? (parsed.topics as TopicConfig[])
           : DEFAULT_CONFIG.topics,
       filterEnabled: parsed.filterEnabled !== false,
@@ -348,17 +361,24 @@ export function joinUrl(
   topics: TopicConfig[],
   topicId?: TopicId,
 ) {
-  const params = new URLSearchParams({ room });
+  const params = new URLSearchParams({ room, ids: topics.map((t) => t.id).join(",") });
   topics.forEach((t) => params.set(`n${t.id}`, t.name));
   if (topicId) params.set("topic", topicId);
   return `${origin}/join?${params.toString()}`;
 }
 
-/** Reads topic names out of the audience URL, falling back to defaults. */
+/** Reads the topic list out of the audience URL, falling back to defaults. */
 export function topicsFromSearch(search: URLSearchParams): TopicConfig[] {
-  return TOPIC_IDS.map((id, i) => ({
+  const idsParam = search.get("ids");
+  const ids = idsParam
+    ? idsParam
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : DEFAULT_CONFIG.topics.map((t) => t.id);
+  return ids.map((id, i) => ({
     id,
-    name: search.get(`n${id}`) || DEFAULT_CONFIG.topics[i]!.name,
+    name: search.get(`n${id}`) || DEFAULT_CONFIG.topics[i]?.name || `主題 ${id}`,
   }));
 }
 

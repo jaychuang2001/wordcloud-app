@@ -3,13 +3,13 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "實時互動文字雲 | 三主題大螢幕即時互動" },
+      { title: "2026年『佛青30．點亮心光』中華佛光青年團員大會｜點亮「心」光" },
       {
         name: "description",
         content:
-          "支援 800 人同時參與的即時文字雲：三個主題、三台大螢幕、手機掃碼輸入，資料留存於本機並可匯出匯入 CSV。",
+          "支援 800 人同時參與的即時文字雲：主題與大螢幕數量可自行增減、手機掃碼輸入，資料留存於本機並可匯出匯入 CSV。",
       },
-      { property: "og:title", content: "實時互動文字雲 | 三主題大螢幕即時互動" },
+      { property: "og:title", content: "2026年『佛青30．點亮心光』中華佛光青年團員大會｜點亮「心」光" },
       {
         property: "og:description",
         content: "手機掃碼即時送詞，大螢幕文字雲動態生長，支援形狀遮罩與跨天數據留存。",
@@ -31,11 +31,14 @@ function Index() {
         <span className="rounded-full border border-border bg-card/60 px-4 py-1 text-xs tracking-widest text-muted-foreground">
           REAL-TIME WORD CLOUD
         </span>
-        <h1 className="mt-6 text-4xl font-black leading-tight text-foreground sm:text-6xl">
-          實時互動文字雲
+        <h1 className="mt-6 text-3xl font-black leading-tight text-foreground sm:text-5xl">
+          2026年『佛青30．點亮心光』
+          <br />
+          中華佛光青年團員大會
         </h1>
+        <p className="mt-3 text-xl font-bold text-primary sm:text-2xl">點亮「心」光</p>
         <p className="mt-5 max-w-xl text-base text-muted-foreground sm:text-lg">
-          現場觀眾掃碼輸入詞彙，三個主題、三台大螢幕各自即時生長文字雲。資料自動存在瀏覽器，隔天續用，並可匯出／匯入 CSV。
+          現場觀眾掃碼輸入詞彙，主題與大螢幕數量可依需求增減，各自即時生長文字雲。資料自動存在瀏覽器，隔天續用，並可匯出／匯入 CSV。
         </p>
 
         <div className="mt-10 flex flex-col gap-3 sm:flex-row">
@@ -55,7 +58,7 @@ function Index() {
 
         <ul className="mt-14 grid w-full gap-4 text-left sm:grid-cols-3">
           {[
-            { t: "三主題分流", d: "/screen/1、/screen/2、/screen/3 各自全螢幕投影。" },
+            { t: "多主題分流", d: "主題數量可自行增減，每個主題 /screen/{id} 各自全螢幕投影。" },
             { t: "形狀遮罩", d: "上傳黑白圖形，文字完美填入輪廓。" },
             { t: "資料留存", d: "本機累積、CSV 匯出與歷史匯入合併。" },
           ].map((f) => (

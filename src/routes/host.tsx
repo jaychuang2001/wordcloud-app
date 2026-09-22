@@ -9,9 +9,11 @@ import {
   joinUrl,
   loadBlocklist,
   loadTopicData,
+  MAX_TOPICS,
+  MIN_TOPICS,
+  nextTopicId,
   saveExtraBlocklist,
-  TOPIC_IDS,
-  type TopicId,
+  type TopicConfig,
 } from "@/lib/wordcloud-core";
 
 export const Route = createFileRoute("/host")({
@@ -20,10 +22,10 @@ export const Route = createFileRoute("/host")({
       { title: "主辦方控制台 | 實時互動文字雲" },
       {
         name: "description",
-        content: "設定房間、三個主題名稱與敏感詞過濾，產生觀眾掃碼 QR Code，並開啟三台大螢幕文字雲。",
+        content: "設定房間、主題名稱（數量可自行增減）與敏感詞過濾，產生觀眾掃碼 QR Code，並開啟對應的大螢幕文字雲。",
       },
       { property: "og:title", content: "主辦方控制台 | 實時互動文字雲" },
-      { property: "og:description", content: "建立房間、產生 QR Code、開啟三台大螢幕文字雲。" },
+      { property: "og:description", content: "建立房間、產生 QR Code、開啟對應數量的大螢幕文字雲。" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -46,7 +48,7 @@ function HostPage() {
   const [apiKey, setApiKey] = useState("");
   const [extraWords, setExtraWords] = useState("");
   const [savedNote, setSavedNote] = useState("");
-  const [counts, setCounts] = useState<Record<TopicId, number>>({ "1": 0, "2": 0, "3": 0 });
+  const [counts, setCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     setOrigin(window.location.origin);
@@ -60,16 +62,16 @@ function HostPage() {
   useEffect(() => {
     if (!ready) return;
     const refresh = () => {
-      setCounts({
-        "1": Object.keys(loadTopicData(config.room, "1").counts).length,
-        "2": Object.keys(loadTopicData(config.room, "2").counts).length,
-        "3": Object.keys(loadTopicData(config.room, "3").counts).length,
-      });
+      const next: Record<string, number> = {};
+      for (const t of config.topics) {
+        next[t.id] = Object.keys(loadTopicData(config.room, t.id).counts).length;
+      }
+      setCounts(next);
     };
     refresh();
     const timer = window.setInterval(refresh, 3000);
     return () => window.clearInterval(timer);
-  }, [config.room, ready]);
+  }, [config.room, config.topics, ready]);
 
   const generalUrl = useMemo(
     () => (origin ? joinUrl(origin, config.room, config.topics) : ""),
@@ -102,6 +104,20 @@ function HostPage() {
     window.setTimeout(() => setSavedNote(""), 3000);
   }
 
+  function addTopic() {
+    if (config.topics.length >= MAX_TOPICS) return;
+    const id = nextTopicId(config.topics);
+    const newTopic: TopicConfig = { id, name: `主題 ${id}` };
+    update({ ...config, topics: [...config.topics, newTopic] });
+  }
+
+  function removeTopic(id: string) {
+    if (config.topics.length <= MIN_TOPICS) return;
+    if (!window.confirm(`確定刪除「${config.topics.find((t) => t.id === id)?.name ?? id}」？該主題的大螢幕網址將失效（已累積的資料不會被刪除）。`))
+      return;
+    update({ ...config, topics: config.topics.filter((t) => t.id !== id) });
+  }
+
   return (
     <main className="min-h-screen bg-background px-5 py-10">
       <div className="mx-auto max-w-5xl">
@@ -109,7 +125,7 @@ function HostPage() {
           <div>
             <h1 className="text-3xl font-black text-foreground">主辦方控制台</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              設定房間與主題，產生掃碼網址，再開啟三台大螢幕。
+              設定房間與主題（可自行新增或刪除），產生掃碼網址，每個主題對應一台大螢幕。
             </p>
           </div>
           <div className="flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm">
@@ -136,7 +152,7 @@ function HostPage() {
               <input
                 value={config.room}
                 onChange={(e) =>
-                  update({ ...config, room: e.target.value.replace(/[^\w-]/g, "").slice(0, 24) })
+                  update({ ...config, room: e.target.value.replace(/[\s/\\?&#%:"']/g, "").slice(0, 24) })
                 }
                 className="mt-1.5 w-full rounded-xl border border-input bg-background px-4 py-2.5 text-base text-foreground outline-none focus:border-primary"
                 placeholder="main"
@@ -145,19 +161,38 @@ function HostPage() {
 
             <div className="mt-5 space-y-3">
               {config.topics.map((topic, i) => (
-                <label key={topic.id} className="block text-sm font-medium text-muted-foreground">
-                  主題 {topic.id} 名稱
-                  <input
-                    value={topic.name}
-                    onChange={(e) => {
-                      const topics = config.topics.slice();
-                      topics[i] = { ...topic, name: e.target.value.slice(0, 20) };
-                      update({ ...config, topics });
-                    }}
-                    className="mt-1.5 w-full rounded-xl border border-input bg-background px-4 py-2.5 text-base text-foreground outline-none focus:border-primary"
-                  />
-                </label>
+                <div key={topic.id} className="flex items-end gap-2">
+                  <label className="block flex-1 text-sm font-medium text-muted-foreground">
+                    主題 {topic.id} 名稱
+                    <input
+                      value={topic.name}
+                      onChange={(e) => {
+                        const topics = config.topics.slice();
+                        topics[i] = { ...topic, name: e.target.value.slice(0, 20) };
+                        update({ ...config, topics });
+                      }}
+                      className="mt-1.5 w-full rounded-xl border border-input bg-background px-4 py-2.5 text-base text-foreground outline-none focus:border-primary"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => removeTopic(topic.id)}
+                    disabled={config.topics.length <= MIN_TOPICS}
+                    title={config.topics.length <= MIN_TOPICS ? "至少要保留一個主題" : "刪除此主題"}
+                    className="mb-0.5 shrink-0 rounded-xl border border-border px-3 py-2.5 text-sm text-muted-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    刪除
+                  </button>
+                </div>
               ))}
+              <button
+                type="button"
+                onClick={addTopic}
+                disabled={config.topics.length >= MAX_TOPICS}
+                className="w-full rounded-xl border border-dashed border-border px-4 py-2.5 text-sm font-medium text-muted-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {config.topics.length >= MAX_TOPICS ? `最多 ${MAX_TOPICS} 個主題` : "+ 新增主題"}
+              </button>
             </div>
 
             <label className="mt-6 flex items-center gap-3 text-sm text-foreground">
@@ -211,7 +246,7 @@ function HostPage() {
 
           <div className="rounded-2xl border border-border bg-card p-6">
             <h2 className="text-lg font-bold text-foreground">通用加入 QR Code</h2>
-            <p className="mt-1 text-sm text-muted-foreground">掃碼後可自由切換三個主題。</p>
+            <p className="mt-1 text-sm text-muted-foreground">掃碼後可自由切換所有主題。</p>
             <div className="mt-5 flex flex-col items-center">
               {generalUrl ? <QrPanel url={generalUrl} size={200} /> : null}
               <p className="mt-3 break-all text-center text-xs text-muted-foreground">{generalUrl}</p>
@@ -219,16 +254,16 @@ function HostPage() {
           </div>
         </section>
 
-        <section className="mt-8 grid gap-5 md:grid-cols-3">
-          {TOPIC_IDS.map((id) => {
-            const topic = config.topics.find((t) => t.id === id)!;
+        <section className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {config.topics.map((topic) => {
+            const id = topic.id;
             const url = origin ? joinUrl(origin, config.room, config.topics, id) : "";
             return (
               <div key={id} className="rounded-2xl border border-border bg-card p-5">
                 <p className="text-xs tracking-widest text-muted-foreground">主題 {id}</p>
                 <h3 className="mt-1 text-xl font-bold text-foreground">{topic.name}</h3>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  已累積 {counts[id]} 個不重複詞彙
+                  已累積 {counts[id] ?? 0} 個不重複詞彙
                 </p>
                 <div className="mt-4 flex justify-center">
                   {url ? <QrPanel url={url} size={150} label="直接進入此主題" /> : null}

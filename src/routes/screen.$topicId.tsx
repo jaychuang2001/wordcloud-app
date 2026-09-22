@@ -30,10 +30,8 @@ import {
   paletteById,
   PALETTES,
   saveTopicData,
-  TOPIC_IDS,
   toCsv,
   type TopicData,
-  type TopicId,
 } from "@/lib/wordcloud-core";
 import { renderWordCloud, type MaskSource } from "@/lib/wordcloud-render";
 import { renderHeartCloud } from "@/lib/heartcloud-render";
@@ -54,7 +52,7 @@ export const Route = createFileRoute("/screen/$topicId")({
   }),
   component: ScreenRoute,
   errorComponent: () => <Centered text="畫面載入失敗，請重新整理。" />,
-  notFoundComponent: () => <Centered text="找不到這個主題，請使用 /screen/1～3。" />,
+  notFoundComponent: () => <Centered text="找不到這個主題，請確認網址中的主題編號是否正確。" />,
 });
 
 function Centered({ text }: { text: string }) {
@@ -75,12 +73,14 @@ function ScreenRoute() {
 
 function ScreenPage() {
   const { topicId: raw } = Route.useParams();
-  const topicId = (TOPIC_IDS.includes(raw as TopicId) ? raw : "1") as TopicId;
+  const topicId = raw;
   const { config, ready } = useWordCloudConfig();
   const { client, status, error } = useAbly();
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const titleRef = useRef<HTMLDivElement | null>(null);
+  const qrRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const maskRef = useRef<HTMLInputElement | null>(null);
   const dataRef = useRef<TopicData>(EMPTY_DATA);
@@ -102,6 +102,11 @@ function ScreenPage() {
   const topicName = topic?.name ?? `主題 ${topicId}`;
 
   useEffect(() => setOrigin(window.location.origin), []);
+
+  const joinLink = useMemo(
+    () => (origin ? joinUrl(origin, config.room, config.topics, topicId) : ""),
+    [origin, config.room, config.topics, topicId],
+  );
 
   const showControls = useCallback(() => {
     if (document.fullscreenElement) return;
@@ -180,12 +185,29 @@ function ScreenPage() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.max(320, Math.floor(wrap.clientWidth * dpr));
     canvas.height = Math.max(240, Math.floor(wrap.clientHeight * dpr));
+
+    // Keep words/shapes from landing under the title or the QR code: measure
+    // their real on-screen boxes and convert to canvas-pixel exclusion zones.
+    const wrapRect = wrap.getBoundingClientRect();
+    const cssPad = 16;
+    const excludeRects = [titleRef.current, qrRef.current]
+      .filter((el): el is HTMLDivElement => el !== null)
+      .map((el) => {
+        const r = el.getBoundingClientRect();
+        return {
+          x: (r.left - wrapRect.left - cssPad) * dpr,
+          y: (r.top - wrapRect.top - cssPad) * dpr,
+          width: (r.width + cssPad * 2) * dpr,
+          height: (r.height + cssPad * 2) * dpr,
+        };
+      });
+
     if (cloudMode === "heart") {
-      void renderHeartCloud({ canvas, counts: dataRef.current.counts, palette, mask });
+      void renderHeartCloud({ canvas, counts: dataRef.current.counts, palette, mask, excludeRects });
     } else {
-      void renderWordCloud({ canvas, counts: dataRef.current.counts, palette, mask, rotate });
+      void renderWordCloud({ canvas, counts: dataRef.current.counts, palette, mask, rotate, excludeRects });
     }
-  }, [palette, mask, rotate, cloudMode]);
+  }, [palette, mask, rotate, cloudMode, topicName, joinLink]);
 
   useEffect(() => {
     draw();
@@ -225,11 +247,6 @@ function ScreenPage() {
     else void document.documentElement.requestFullscreen();
   }
 
-  const joinLink = useMemo(
-    () => (origin ? joinUrl(origin, config.room, config.topics, topicId) : ""),
-    [origin, config.room, config.topics, topicId],
-  );
-
   const totalWords = Object.keys(data.counts).length;
   const totalEntries = data.records.length;
   const statusText =
@@ -247,7 +264,7 @@ function ScreenPage() {
         <canvas ref={canvasRef} className="h-full w-full" />
       </div>
 
-      <div className="pointer-events-none absolute left-8 top-6 text-projection-foreground">
+      <div ref={titleRef} className="pointer-events-none absolute left-8 top-6 text-projection-foreground">
         <p className="text-xs uppercase text-projection-muted">主題 {topicId}</p>
         <h1 className="mt-1 text-4xl font-black drop-shadow-lg">{topicName}</h1>
         <p className="mt-2 text-sm text-projection-muted">
@@ -256,7 +273,7 @@ function ScreenPage() {
       </div>
 
       {joinLink ? (
-        <div className="absolute right-8 top-6 text-center text-projection-foreground">
+        <div ref={qrRef} className="absolute right-8 top-6 text-center text-projection-foreground">
           <QrPanel url={joinLink} size={140} />
           <p className="mt-2 text-xs text-projection-muted">掃碼加入此主題</p>
         </div>
