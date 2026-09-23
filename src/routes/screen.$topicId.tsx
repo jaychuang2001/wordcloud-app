@@ -1,6 +1,7 @@
 import { ClientOnly, createFileRoute } from "@tanstack/react-router";
 import {
   Download,
+  Eye,
   EyeOff,
   Heart,
   ImagePlus,
@@ -33,7 +34,7 @@ import {
   toCsv,
   type TopicData,
 } from "@/lib/wordcloud-core";
-import { renderWordCloud, type MaskSource } from "@/lib/wordcloud-render";
+import { renderWordCloud, renderMaskPreview, type MaskSource } from "@/lib/wordcloud-render";
 import { renderHeartCloud } from "@/lib/heartcloud-render";
 
 export const Route = createFileRoute("/screen/$topicId")({
@@ -92,6 +93,7 @@ function ScreenPage() {
   const [paletteId, setPaletteId] = useState("grey-wall");
   const [rotate, setRotate] = useState(true);
   const [cloudMode, setCloudMode] = useState<"text" | "heart">("text");
+  const [showMaskPreview, setShowMaskPreview] = useState(false);
   const [panel, setPanel] = useState(true);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
@@ -202,12 +204,14 @@ function ScreenPage() {
         };
       });
 
-    if (cloudMode === "heart") {
+    if (showMaskPreview) {
+      void renderMaskPreview({ canvas, mask, excludeRects });
+    } else if (cloudMode === "heart") {
       void renderHeartCloud({ canvas, counts: dataRef.current.counts, palette, mask, excludeRects });
     } else {
       void renderWordCloud({ canvas, counts: dataRef.current.counts, palette, mask, rotate, excludeRects });
     }
-  }, [palette, mask, rotate, cloudMode, topicName, joinLink]);
+  }, [palette, mask, rotate, cloudMode, topicName, joinLink, showMaskPreview]);
 
   useEffect(() => {
     draw();
@@ -322,6 +326,11 @@ function ScreenPage() {
             icon={cloudMode === "heart" ? <Type /> : <Heart />}
           />
           <ScreenButton label="上傳形狀遮罩" onClick={() => maskRef.current?.click()} icon={<ImagePlus />} />
+          <ScreenButton
+            label={showMaskPreview ? "關閉遮罩預覽" : "預覽遮罩範圍"}
+            onClick={() => setShowMaskPreview((v) => !v)}
+            icon={showMaskPreview ? <EyeOff /> : <Eye />}
+          />
           {mask ? <ScreenButton label="移除遮罩" onClick={() => setMask(null)} icon={<Trash2 />} /> : null}
           <ScreenButton label="匯出 CSV" onClick={() => downloadCsv(`${config.room}-topic${topicId}.csv`, toCsv(data, topicName))} icon={<Download />} />
           <ScreenButton label="匯入歷史 CSV" onClick={() => fileRef.current?.click()} icon={<Upload />} />

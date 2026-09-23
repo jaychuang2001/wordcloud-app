@@ -1,5 +1,5 @@
 import type { Palette } from "./wordcloud-core";
-import { computeMaskInsideMap, loadMaskImage, paintMaskBackground } from "./wordcloud-render";
+import { getMaskInsideMap, paintMaskBackground } from "./wordcloud-render";
 import type { ExcludeRect, MaskSource } from "./wordcloud-render";
 
 export type { ExcludeRect, MaskSource };
@@ -158,6 +158,16 @@ function drawGlowingShape(
   ctx.restore();
 }
 
+/** Vertical offset (as a fraction of size) so text sits visually centered in each shape. */
+function textOffsetForShape(shape: ShapeKind): number {
+  // The heart's rounded lobes make its visual "mass" sit above the
+  // geometric bounding-box center (the bottom tapers to a point), so its
+  // label needs to shift up a bit. Star and cloud are already close to
+  // centered on their bounding box.
+  if (shape === "heart") return -0.1;
+  return 0;
+}
+
 function fitFontSize(
   ctx: CanvasRenderingContext2D,
   text: string,
@@ -216,9 +226,8 @@ export async function renderHeartCloud({
   let outerInside: Uint8Array | null = null;
   if (mask) {
     try {
-      const img = await loadMaskImage(mask.dataUrl);
+      outerInside = await getMaskInsideMap(mask.dataUrl, width, height);
       if (token !== renderToken) return;
-      outerInside = computeMaskInsideMap(img, width, height);
       await paintMaskBackground(canvas, mask.dataUrl, palette.background);
       if (token !== renderToken) return;
     } catch {
@@ -372,7 +381,7 @@ export async function renderHeartCloud({
     const fitted = fitFontSize(ctx, h.word, maxTextWidth, h.size * 0.24);
     ctx.font = `700 ${fitted}px ${FONT_STACK}`;
     const label = truncateForWidth(ctx, h.word, maxTextWidth);
-    ctx.fillText(label, h.x, h.y - h.size * 0.1);
+    ctx.fillText(label, h.x, h.y + h.size * textOffsetForShape(shape));
     ctx.restore();
   }
   // Words that never found room after the minimum scale are silently

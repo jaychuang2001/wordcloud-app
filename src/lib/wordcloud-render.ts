@@ -31,6 +31,40 @@ export async function loadMaskImage(dataUrl: string): Promise<HTMLImageElement> 
   });
 }
 
+// Decoding the mask image and scanning every pixel is the expensive part of
+// using a shape mask. The mask itself rarely changes between redraws (new
+// words trigger a redraw far more often than a new mask upload), so cache
+// the result and only redo the work when the mask or canvas size changes.
+let maskFieldCache: { key: string; inside: Uint8Array } | null = null;
+
+function maskCacheKey(dataUrl: string, width: number, height: number): string {
+  // dataUrl can be several MB; hashing the whole thing on every redraw would
+  // defeat the point of caching, so fingerprint it cheaply instead.
+  return `${dataUrl.length}:${dataUrl.slice(0, 48)}:${width}x${height}`;
+}
+
+export async function getMaskInsideMap(
+  dataUrl: string,
+  width: number,
+  height: number,
+): Promise<Uint8Array> {
+  const key = maskCacheKey(dataUrl, width, height);
+  if (maskFieldCache && maskFieldCache.key === key) return maskFieldCache.inside;
+  const img = await loadMaskImage(dataUrl);
+  const inside = computeMaskInsideMap(img, width, height);
+  maskFieldCache = { key, inside };
+  return inside;
+}
+
+function getMaskDrawRect(img: HTMLImageElement, width: number, height: number) {
+  const scale = Math.min(width / img.width, height / img.height);
+  const w = img.width * scale;
+  const h = img.height * scale;
+  const dx = (width - w) / 2;
+  const dy = (height - h) / 2;
+  return { w, h, dx, dy };
+}
+
 /**
  * Returns a width*height boolean map (1 = inside the shape / usable space).
  * Shared by the classic text cloud (background-colour trick) and the heart
@@ -48,12 +82,7 @@ export function computeMaskInsideMap(
   const inside = new Uint8Array(width * height);
   if (!octx) return inside;
 
-  const scale = Math.min(width / img.width, height / img.height);
-  const w = img.width * scale;
-  const h = img.height * scale;
-  const dx = (width - w) / 2;
-  const dy = (height - h) / 2;
-
+  const { w, h, dx, dy } = getMaskDrawRect(img, width, height);
   octx.fillStyle = "#ffffff";
   octx.fillRect(0, 0, width, height);
   octx.drawImage(img, dx, dy, w, h);
@@ -63,37 +92,103 @@ export function computeMaskInsideMap(
   for (let i = 0, p = 0; i < px.length; i += 4, p++) {
     const alpha = px[i + 3]!;
     const luminance = (px[i]! * 299 + px[i + 1]! * 587 + px[i + 2]! * 114) / 1000;
-    // Inside the shape = opaque and dark → usable space.
+    // Black in the source = usable space for words; white/transparent = the
+    // visible pattern that stays on screen.
     inside[p] = alpha > 128 && luminance < 128 ? 1 : 0;
   }
   return inside;
 }
 
+/**
+ * Paints the mask image so its white/light artwork stays visible on screen,
+ * while the black areas (usable space for words) are erased back to the
+ * exact background colour so they're ready to receive text.
+ */
 export async function paintMaskBackground(
   canvas: HTMLCanvasElement,
   dataUrl: string,
   background: string,
 ): Promise<void> {
-  const img = await loadMaskImage(dataUrl);
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) return;
 
-  const inside = computeMaskInsideMap(img, canvas.width, canvas.height);
-  const [br, bg, bb] = hexToRgb(background);
-  const nr = br > 8 ? br - 4 : br + 4;
-  const ng = bg > 8 ? bg - 4 : bg + 4;
-  const nb = bb > 8 ? bb - 4 : bb + 4;
+  const img = await loadMaskImage(dataUrl);
+  const inside = await getMaskInsideMap(dataUrl, canvas.width, canvas.height);
 
-  const frame = ctx.createImageData(canvas.width, canvas.height);
+  ctx.fillStyle = background;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const { w, h, dx, dy } = getMaskDrawRect(img, canvas.width, canvas.height);
+  ctx.drawImage(img, dx, dy, w, h);
+
+  const [br, bg, bb] = hexToRgb(background);
+  const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const px = frame.data;
   for (let p = 0, i = 0; p < inside.length; p++, i += 4) {
+    if (inside[p] === 1) {
+      px[i] = br;
+      px[i + 1] = bg;
+      px[i + 2] = bb;
+      px[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(frame, 0, 0);
+}
+
+export type MaskPreviewOptions = {
+  canvas: HTMLCanvasElement;
+  mask: MaskSource;
+  excludeRects?: ExcludeRect[];
+};
+
+/**
+ * Diagnostic view: paints "usable" space in green and blocked space (outside
+ * the mask shape, plus the title/QR exclusion zones) in red, so the host can
+ * check the mask is being read correctly before relying on it live.
+ */
+export async function renderMaskPreview({ canvas, mask, excludeRects }: MaskPreviewOptions): Promise<void> {
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return;
+  const { width, height } = canvas;
+
+  let inside: Uint8Array;
+  if (mask) {
+    try {
+      inside = await getMaskInsideMap(mask.dataUrl, width, height);
+    } catch {
+      inside = new Uint8Array(width * height).fill(1);
+    }
+  } else {
+    inside = new Uint8Array(width * height).fill(1);
+  }
+
+  const frame = ctx.createImageData(width, height);
+  const px = frame.data;
+  // Usable = translucent green; blocked = translucent red, over a dark base.
+  for (let p = 0, i = 0; p < inside.length; p++, i += 4) {
     const isIn = inside[p] === 1;
-    px[i] = isIn ? br : nr;
-    px[i + 1] = isIn ? bg : ng;
-    px[i + 2] = isIn ? bb : nb;
+    px[i] = isIn ? 34 : 190;
+    px[i + 1] = isIn ? 197 : 40;
+    px[i + 2] = isIn ? 94 : 40;
     px[i + 3] = 255;
   }
   ctx.putImageData(frame, 0, 0);
+
+  if (excludeRects && excludeRects.length > 0) {
+    ctx.save();
+    ctx.fillStyle = "rgba(190, 40, 40, 0.9)";
+    for (const r of excludeRects) ctx.fillRect(r.x, r.y, r.width, r.height);
+    ctx.restore();
+  }
+
+  ctx.save();
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "700 20px sans-serif";
+  ctx.textBaseline = "top";
+  ctx.shadowColor = "rgba(0,0,0,0.6)";
+  ctx.shadowBlur = 6;
+  ctx.fillText("綠色 = 可以放字／形狀　紅色 = 禁區", 16, 16);
+  ctx.restore();
 }
 
 export type RenderOptions = {
@@ -149,9 +244,14 @@ export async function renderWordCloud({
   if (!ctx) return;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+  // A mask shrinks the usable area a lot, and wordcloud2's placement search
+  // gets disproportionately expensive on a small/irregular shape. Cap how
+  // much work we ask for so a busy mask can't freeze the tab.
+  const effectiveMaxWords = mask ? Math.min(maxWords, 90) : maxWords;
+
   const entries = Object.entries(counts)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, maxWords);
+    .slice(0, effectiveMaxWords);
 
   if (entries.length === 0) {
     ctx.fillStyle = palette.background;
@@ -195,11 +295,15 @@ export async function renderWordCloud({
     canvas.removeEventListener("wordcloudstop", restoreFillText);
   };
   canvas.addEventListener("wordcloudstop", restoreFillText, { once: true });
+  // Safety net: if wordcloudstop never fires for some reason, don't leave
+  // fillText permanently patched.
+  window.setTimeout(restoreFillText, 8000);
 
   WordCloud(canvas, {
     list: entries,
-    gridSize: Math.max(4, Math.round((base / 1000) * 10)),
+    gridSize: Math.max(4, Math.round((base / 1000) * (mask ? 16 : 10))),
     weightFactor,
+    minSize: 10,
     fontFamily: '"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif',
     fontWeight: "700",
     color: () => palette.colors[colorIndex++ % palette.colors.length]!,

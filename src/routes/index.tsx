@@ -31,12 +31,12 @@ function Index() {
         <span className="rounded-full border border-border bg-card/60 px-4 py-1 text-xs tracking-widest text-muted-foreground">
           REAL-TIME WORD CLOUD
         </span>
-        <h1 className="mt-6 text-3xl font-black leading-tight text-foreground sm:text-5xl">
-          2026年『佛青30．點亮心光』
-          <br />
-          中華佛光青年團員大會
+        <h1 className="mt-6 text-5xl font-black leading-tight text-yellow-400 drop-shadow-sm sm:text-7xl">
+          點亮「心」光
         </h1>
-        <p className="mt-3 text-xl font-bold text-primary sm:text-2xl">點亮「心」光</p>
+        <p className="mt-3 text-base font-bold text-foreground sm:text-xl">
+          2026年『佛青30．點亮心光』中華佛光青年團員大會
+        </p>
         <p className="mt-5 max-w-xl text-base text-muted-foreground sm:text-lg">
           現場觀眾掃碼輸入詞彙，主題與大螢幕數量可依需求增減，各自即時生長文字雲。資料自動存在瀏覽器，隔天續用，並可匯出／匯入 CSV。
         </p>
