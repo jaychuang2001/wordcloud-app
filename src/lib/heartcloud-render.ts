@@ -159,11 +159,12 @@ function drawGlowingShape(
 }
 
 /** Vertical offset (as a fraction of size) so text sits visually centered in each shape. */
-function textOffsetForShape(_shape: ShapeKind): number {
-  // Empirically (and by area-centroid calculation) all three shapes read as
-  // centered with the label placed at the plain geometric center — the
-  // heart's tapered tail doesn't pull the visual center up as much as it
-  // might seem.
+function textOffsetForShape(shape: ShapeKind): number {
+  // Star and cloud read as centered with no adjustment. The heart's glowing
+  // outline visually reads as "shorter" than its true path bounds (the
+  // pointed tail's glow is much less prominent than the wide top lobes), so
+  // without correction the label sits noticeably above center — push it down.
+  if (shape === "heart") return 0.16;
   return 0;
 }
 
