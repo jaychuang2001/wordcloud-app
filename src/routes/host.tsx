@@ -19,12 +19,12 @@ import {
 export const Route = createFileRoute("/host")({
   head: () => ({
     meta: [
-      { title: "主辦方控制台 | 實時互動文字雲" },
+      { title: "主辦方控制台｜點亮「心」光" },
       {
         name: "description",
         content: "設定房間、主題名稱（數量可自行增減）與敏感詞過濾，產生觀眾掃碼 QR Code，並開啟對應的大螢幕文字雲。",
       },
-      { property: "og:title", content: "主辦方控制台 | 實時互動文字雲" },
+      { property: "og:title", content: "主辦方控制台｜點亮「心」光" },
       { property: "og:description", content: "建立房間、產生 QR Code、開啟對應數量的大螢幕文字雲。" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

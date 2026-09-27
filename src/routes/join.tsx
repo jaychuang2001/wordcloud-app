@@ -17,12 +17,12 @@ const COOLDOWN_SECONDS = 10;
 export const Route = createFileRoute("/join")({
   head: () => ({
     meta: [
-      { title: "送出你的詞彙 | 實時互動文字雲" },
+      { title: "送出你的詞彙｜點亮「心」光" },
       {
         name: "description",
         content: "手機掃碼後選擇主題，輸入 1-3 個詞彙送出，立即出現在現場大螢幕的文字雲上。",
       },
-      { property: "og:title", content: "送出你的詞彙 | 實時互動文字雲" },
+      { property: "og:title", content: "送出你的詞彙｜點亮「心」光" },
       { property: "og:description", content: "選擇主題、輸入詞彙，即時投影到現場大螢幕。" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

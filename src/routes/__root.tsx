@@ -77,9 +77,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "實時互動文字雲" },
+      { title: "點亮「心」光" },
       { name: "description", content: "多主題大螢幕即時互動文字雲" },
-      { property: "og:title", content: "實時互動文字雲" },
+      { property: "og:title", content: "點亮「心」光" },
       { property: "og:description", content: "多主題大螢幕即時互動文字雲" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

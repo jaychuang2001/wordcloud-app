@@ -40,12 +40,12 @@ import { renderHeartCloud } from "@/lib/heartcloud-render";
 export const Route = createFileRoute("/screen/$topicId")({
   head: () => ({
     meta: [
-      { title: "大螢幕文字雲 | 實時互動文字雲" },
+      { title: "大螢幕文字雲｜點亮「心」光" },
       {
         name: "description",
         content: "單一主題的全螢幕即時文字雲，支援形狀遮罩、CSV 匯出匯入與現場掃碼 QR Code。",
       },
-      { property: "og:title", content: "大螢幕文字雲 | 實時互動文字雲" },
+      { property: "og:title", content: "大螢幕文字雲｜點亮「心」光" },
       { property: "og:description", content: "現場投影的即時文字雲畫面。" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

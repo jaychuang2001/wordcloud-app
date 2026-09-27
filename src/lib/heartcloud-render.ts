@@ -164,7 +164,7 @@ function textOffsetForShape(shape: ShapeKind): number {
   // geometric bounding-box center (the bottom tapers to a point), so its
   // label needs to shift up a bit. Star and cloud are already close to
   // centered on their bounding box.
-  if (shape === "heart") return -0.1;
+  if (shape === "heart") return -0.15;
   return 0;
 }
 
