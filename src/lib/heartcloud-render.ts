@@ -159,12 +159,11 @@ function drawGlowingShape(
 }
 
 /** Vertical offset (as a fraction of size) so text sits visually centered in each shape. */
-function textOffsetForShape(shape: ShapeKind): number {
-  // The heart's rounded lobes make its visual "mass" sit above the
-  // geometric bounding-box center (the bottom tapers to a point), so its
-  // label needs to shift up a bit. Star and cloud are already close to
-  // centered on their bounding box.
-  if (shape === "heart") return -0.15;
+function textOffsetForShape(_shape: ShapeKind): number {
+  // Empirically (and by area-centroid calculation) all three shapes read as
+  // centered with the label placed at the plain geometric center — the
+  // heart's tapered tail doesn't pull the visual center up as much as it
+  // might seem.
   return 0;
 }
 
