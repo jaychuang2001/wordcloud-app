@@ -8,6 +8,7 @@ import {
   Maximize,
   Minimize,
   RotateCcw,
+  StickyNote,
   Trash2,
   Type,
   Upload,
@@ -36,6 +37,7 @@ import {
 } from "@/lib/wordcloud-core";
 import { renderWordCloud, renderMaskPreview, type MaskSource } from "@/lib/wordcloud-render";
 import { renderHeartCloud } from "@/lib/heartcloud-render";
+import { MessageBoard } from "@/components/MessageBoard";
 
 export const Route = createFileRoute("/screen/$topicId")({
   head: () => ({
@@ -92,7 +94,7 @@ function ScreenPage() {
   const [mask, setMask] = useState<MaskSource>(null);
   const [paletteId, setPaletteId] = useState("grey-wall");
   const [rotate, setRotate] = useState(true);
-  const [cloudMode, setCloudMode] = useState<"text" | "heart">("text");
+  const [cloudMode, setCloudMode] = useState<"text" | "heart" | "board">("text");
   const [showMaskPreview, setShowMaskPreview] = useState(false);
   const [panel, setPanel] = useState(true);
   const [controlsVisible, setControlsVisible] = useState(true);
@@ -184,6 +186,13 @@ function ScreenPage() {
     const canvas = canvasRef.current;
     const wrap = wrapRef.current;
     if (!canvas || !wrap) return;
+    if (cloudMode === "board") {
+      // Message board is a plain DOM overlay, not a canvas drawing — just
+      // make sure nothing stale is left painted underneath it.
+      const ctx = canvas.getContext("2d");
+      ctx?.clearRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.max(320, Math.floor(wrap.clientWidth * dpr));
     canvas.height = Math.max(240, Math.floor(wrap.clientHeight * dpr));
@@ -265,7 +274,8 @@ function ScreenPage() {
   return (
     <main className="relative h-screen w-screen overflow-hidden" style={{ background: palette.background }}>
       <div ref={wrapRef} className="absolute inset-0">
-        <canvas ref={canvasRef} className="h-full w-full" />
+        <canvas ref={canvasRef} className={cloudMode === "board" ? "hidden" : "h-full w-full"} />
+        {cloudMode === "board" ? <MessageBoard records={data.records} /> : null}
       </div>
 
       <div ref={titleRef} className="pointer-events-none absolute left-8 top-6 text-projection-foreground">
@@ -321,9 +331,13 @@ function ScreenPage() {
           </div>
           <ScreenButton label={rotate ? "關閉文字傾斜" : "開啟文字傾斜"} onClick={() => setRotate((v) => !v)} icon={<RotateCcw />} />
           <ScreenButton
-            label={cloudMode === "heart" ? "切換回文字雲" : "切換成愛心模式"}
-            onClick={() => setCloudMode((m) => (m === "heart" ? "text" : "heart"))}
-            icon={cloudMode === "heart" ? <Type /> : <Heart />}
+            label={
+              cloudMode === "text" ? "切換成愛心模式" : cloudMode === "heart" ? "切換成留言板模式" : "切換回文字雲"
+            }
+            onClick={() =>
+              setCloudMode((m) => (m === "text" ? "heart" : m === "heart" ? "board" : "text"))
+            }
+            icon={cloudMode === "text" ? <Heart /> : cloudMode === "heart" ? <StickyNote /> : <Type />}
           />
           <ScreenButton label="上傳形狀遮罩" onClick={() => maskRef.current?.click()} icon={<ImagePlus />} />
           <ScreenButton

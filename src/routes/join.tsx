@@ -7,8 +7,8 @@ import {
   DEFAULT_ROOM,
   isBlocked,
   loadBlocklist,
-  MAX_WORD_LENGTH,
   normalizeWord,
+  topicMaxLength,
   topicsFromSearch,
 } from "@/lib/wordcloud-core";
 
@@ -76,6 +76,7 @@ function JoinPage() {
   const room = search.get("room") || DEFAULT_ROOM;
   const topics = useMemo(() => topicsFromSearch(search), [search]);
   const activeTopic = topics.find((t) => t.id === active) ?? topics[0];
+  const activeMaxLength = topicMaxLength(activeTopic);
   const cooling = (cooldowns[active] ?? 0) > 0;
 
   const statusText =
@@ -89,7 +90,7 @@ function JoinPage() {
 
   async function submit() {
     if (cooling) return;
-    const cleaned = words.map(normalizeWord).filter(Boolean);
+    const cleaned = words.map((w) => normalizeWord(w, activeMaxLength)).filter(Boolean);
     if (cleaned.length === 0) {
       setMessage("請至少輸入一個詞彙");
       return;
@@ -161,12 +162,13 @@ function JoinPage() {
 
         <section className="mt-5 rounded-2xl border border-border bg-card p-5">
           <p className="text-sm font-semibold text-foreground">目前主題：{activeTopic?.name ?? ""}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">每則最多 {activeMaxLength} 字</p>
           <div className="mt-4 space-y-3">
             {words.map((w, i) => (
               <input
                 key={i}
                 value={w}
-                maxLength={MAX_WORD_LENGTH}
+                maxLength={activeMaxLength}
                 onChange={(e) => {
                   const next = words.slice();
                   next[i] = e.target.value;

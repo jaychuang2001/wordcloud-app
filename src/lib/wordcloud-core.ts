@@ -4,7 +4,20 @@ export type TopicId = string;
 export const MIN_TOPICS = 1;
 export const MAX_TOPICS = 12;
 
-export type TopicConfig = { id: TopicId; name: string };
+export type TopicConfig = { id: TopicId; name: string; maxLength?: number };
+
+/** Hard ceiling regardless of what a topic is configured to allow (abuse guard). */
+export const ABSOLUTE_MAX_WORD_LENGTH = 200;
+/** Default per-topic limit for new topics — short, word-cloud-friendly. */
+export const DEFAULT_TOPIC_MAX_LENGTH = 5;
+
+export function topicMaxLength(topic: TopicConfig | undefined): number {
+  const n = topic?.maxLength;
+  if (typeof n === "number" && Number.isFinite(n) && n >= 1) {
+    return Math.min(Math.floor(n), ABSOLUTE_MAX_WORD_LENGTH);
+  }
+  return DEFAULT_TOPIC_MAX_LENGTH;
+}
 
 /** Smallest unused topic number, so newly added topics keep tidy, short ids like "4", "5"… */
 export function nextTopicId(existing: TopicConfig[]): string {
@@ -27,9 +40,9 @@ export const DEFAULT_ROOM = "main";
 export const DEFAULT_CONFIG: RoomConfig = {
   room: DEFAULT_ROOM,
   topics: [
-    { id: "1", name: "主題 A" },
-    { id: "2", name: "主題 B" },
-    { id: "3", name: "主題 C" },
+    { id: "1", name: "主題 A", maxLength: DEFAULT_TOPIC_MAX_LENGTH },
+    { id: "2", name: "主題 B", maxLength: DEFAULT_TOPIC_MAX_LENGTH },
+    { id: "3", name: "主題 C", maxLength: DEFAULT_TOPIC_MAX_LENGTH },
   ],
   filterEnabled: true,
 };
@@ -113,10 +126,12 @@ export function isBlocked(word: string, list = loadBlocklist()): boolean {
   return list.some((bad) => bad && lower.includes(bad.toLowerCase()));
 }
 
+/** @deprecated kept for anything not yet passing a per-topic limit; prefer topicMaxLength(). */
 export const MAX_WORD_LENGTH = 20;
 
-export function normalizeWord(raw: string): string {
-  return raw.replace(/\s+/g, " ").trim().slice(0, MAX_WORD_LENGTH);
+export function normalizeWord(raw: string, maxLength: number = MAX_WORD_LENGTH): string {
+  const limit = Math.min(Math.max(1, Math.floor(maxLength)), ABSOLUTE_MAX_WORD_LENGTH);
+  return raw.replace(/\s+/g, " ").trim().slice(0, limit);
 }
 
 /* ------------------------------------------------------------------ */
@@ -362,7 +377,10 @@ export function joinUrl(
   topicId?: TopicId,
 ) {
   const params = new URLSearchParams({ room, ids: topics.map((t) => t.id).join(",") });
-  topics.forEach((t) => params.set(`n${t.id}`, t.name));
+  topics.forEach((t) => {
+    params.set(`n${t.id}`, t.name);
+    params.set(`m${t.id}`, String(topicMaxLength(t)));
+  });
   if (topicId) params.set("topic", topicId);
   return `${origin}/join?${params.toString()}`;
 }
@@ -376,10 +394,14 @@ export function topicsFromSearch(search: URLSearchParams): TopicConfig[] {
         .map((s) => s.trim())
         .filter(Boolean)
     : DEFAULT_CONFIG.topics.map((t) => t.id);
-  return ids.map((id, i) => ({
-    id,
-    name: search.get(`n${id}`) || DEFAULT_CONFIG.topics[i]?.name || `主題 ${id}`,
-  }));
+  return ids.map((id, i) => {
+    const m = Number(search.get(`m${id}`));
+    return {
+      id,
+      name: search.get(`n${id}`) || DEFAULT_CONFIG.topics[i]?.name || `主題 ${id}`,
+      maxLength: Number.isFinite(m) && m >= 1 ? m : DEFAULT_TOPIC_MAX_LENGTH,
+    };
+  });
 }
 
 export function channelName(room: string, topicId: TopicId) {

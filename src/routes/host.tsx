@@ -6,6 +6,7 @@ import { QrPanel } from "@/components/QrPanel";
 import { useWordCloudConfig } from "@/hooks/use-wordcloud-config";
 import { LOCAL_KEY_STORAGE, resetAblyClient, useAbly } from "@/lib/ably-client";
 import {
+  DEFAULT_TOPIC_MAX_LENGTH,
   joinUrl,
   loadBlocklist,
   loadTopicData,
@@ -13,8 +14,13 @@ import {
   MIN_TOPICS,
   nextTopicId,
   saveExtraBlocklist,
+  topicMaxLength,
   type TopicConfig,
 } from "@/lib/wordcloud-core";
+
+// A generous-but-sane ceiling for "留言板" (message board) topics — not
+// literally unlimited, so a single sticky note can't blow out the layout.
+const BOARD_MAX_LENGTH = 150;
 
 export const Route = createFileRoute("/host")({
   head: () => ({
@@ -107,7 +113,7 @@ function HostPage() {
   function addTopic() {
     if (config.topics.length >= MAX_TOPICS) return;
     const id = nextTopicId(config.topics);
-    const newTopic: TopicConfig = { id, name: `主題 ${id}` };
+    const newTopic: TopicConfig = { id, name: `主題 ${id}`, maxLength: DEFAULT_TOPIC_MAX_LENGTH };
     update({ ...config, topics: [...config.topics, newTopic] });
   }
 
@@ -160,31 +166,87 @@ function HostPage() {
             </label>
 
             <div className="mt-5 space-y-3">
-              {config.topics.map((topic, i) => (
-                <div key={topic.id} className="flex items-end gap-2">
-                  <label className="block flex-1 text-sm font-medium text-muted-foreground">
-                    主題 {topic.id} 名稱
-                    <input
-                      value={topic.name}
-                      onChange={(e) => {
-                        const topics = config.topics.slice();
-                        topics[i] = { ...topic, name: e.target.value.slice(0, 20) };
-                        update({ ...config, topics });
-                      }}
-                      className="mt-1.5 w-full rounded-xl border border-input bg-background px-4 py-2.5 text-base text-foreground outline-none focus:border-primary"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => removeTopic(topic.id)}
-                    disabled={config.topics.length <= MIN_TOPICS}
-                    title={config.topics.length <= MIN_TOPICS ? "至少要保留一個主題" : "刪除此主題"}
-                    className="mb-0.5 shrink-0 rounded-xl border border-border px-3 py-2.5 text-sm text-muted-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    刪除
-                  </button>
-                </div>
-              ))}
+              {config.topics.map((topic, i) => {
+                const currentMax = topicMaxLength(topic);
+                const isBoardPreset = currentMax === BOARD_MAX_LENGTH;
+                return (
+                  <div key={topic.id} className="rounded-xl border border-border/60 p-3">
+                    <div className="flex items-end gap-2">
+                      <label className="block flex-1 text-sm font-medium text-muted-foreground">
+                        主題 {topic.id} 名稱
+                        <input
+                          value={topic.name}
+                          onChange={(e) => {
+                            const topics = config.topics.slice();
+                            topics[i] = { ...topic, name: e.target.value.slice(0, 20) };
+                            update({ ...config, topics });
+                          }}
+                          className="mt-1.5 w-full rounded-xl border border-input bg-background px-4 py-2.5 text-base text-foreground outline-none focus:border-primary"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => removeTopic(topic.id)}
+                        disabled={config.topics.length <= MIN_TOPICS}
+                        title={config.topics.length <= MIN_TOPICS ? "至少要保留一個主題" : "刪除此主題"}
+                        className="mb-0.5 shrink-0 rounded-xl border border-border px-3 py-2.5 text-sm text-muted-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        刪除
+                      </button>
+                    </div>
+
+                    <div className="mt-2.5 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                      <span>觀眾可輸入字數上限</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={200}
+                        value={currentMax}
+                        onChange={(e) => {
+                          const n = Math.max(1, Math.min(200, Math.floor(Number(e.target.value) || 1)));
+                          const topics = config.topics.slice();
+                          topics[i] = { ...topic, maxLength: n };
+                          update({ ...config, topics });
+                        }}
+                        className="w-20 rounded-lg border border-input bg-background px-2.5 py-1.5 text-foreground outline-none focus:border-primary"
+                      />
+                      <span>字</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const topics = config.topics.slice();
+                          topics[i] = { ...topic, maxLength: DEFAULT_TOPIC_MAX_LENGTH };
+                          update({ ...config, topics });
+                        }}
+                        className={
+                          "rounded-full border px-3 py-1 text-xs font-medium " +
+                          (!isBoardPreset
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border text-muted-foreground hover:bg-secondary")
+                        }
+                      >
+                        文字雲（{DEFAULT_TOPIC_MAX_LENGTH} 字）
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const topics = config.topics.slice();
+                          topics[i] = { ...topic, maxLength: BOARD_MAX_LENGTH };
+                          update({ ...config, topics });
+                        }}
+                        className={
+                          "rounded-full border px-3 py-1 text-xs font-medium " +
+                          (isBoardPreset
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border text-muted-foreground hover:bg-secondary")
+                        }
+                      >
+                        留言板（{BOARD_MAX_LENGTH} 字）
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
               <button
                 type="button"
                 onClick={addTopic}

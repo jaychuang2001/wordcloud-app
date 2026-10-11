@@ -1,6 +1,6 @@
 # 實時互動文字雲
 
-三主題大螢幕即時互動文字雲：主辦方設定房間與主題、觀眾掃碼輸入詞彙、大螢幕即時生長文字雲，資料可匯出／匯入 CSV。
+多主題大螢幕即時互動文字雲：主辦方設定房間與主題（數量可自行增減）、觀眾掃碼輸入詞彙、大螢幕即時生長文字雲，資料可匯出／匯入 CSV。
 
 以 [TanStack Start](https://tanstack.com/start) + React + TypeScript + Tailwind CSS 建置，即時通訊使用 [Ably](https://ably.com)。
 

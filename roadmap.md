@@ -3,7 +3,7 @@
 - [x] 共用模組：主題設定、敏感詞、CSV、LocalStorage、Ably 連線
 - [x] 伺服器端 Ably token 端點（使用 ABLY_API_KEY）
 - [x] 首頁 `/`：入口說明
-- [x] 主辦方 `/host`：設定、QR、三主題總覽
+- [x] 主辦方 `/host`：設定、QR、可增減數量的多主題總覽
 - [x] 大螢幕 `/screen/$topicId`：文字雲、遮罩、CSV 匯出匯入、清空、全螢幕、QR
 - [x] 觀眾 `/join`：主題分頁、1-3 詞輸入、各主題獨立 10 秒冷卻、敏感詞檢查
 - [x] 深色舞台配色與 head metadata
