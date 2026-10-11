@@ -29,6 +29,7 @@ import {
   mergeCsv,
   mergeWords,
   normalizeWord,
+  topicMaxLength,
   paletteById,
   PALETTES,
   saveTopicData,
@@ -104,6 +105,7 @@ function ScreenPage() {
   const palette = paletteById(paletteId);
   const topic = config.topics.find((t) => t.id === topicId);
   const topicName = topic?.name ?? `主題 ${topicId}`;
+  const topicLimit = topicMaxLength(topic);
 
   useEffect(() => setOrigin(window.location.origin), []);
 
@@ -156,7 +158,7 @@ function ScreenPage() {
       const payload = msg.data as { words?: unknown; ts?: unknown } | undefined;
       const words = Array.isArray(payload?.words)
         ? (payload!.words as unknown[])
-            .map((w) => normalizeWord(String(w)))
+            .map((w) => normalizeWord(String(w), topicLimit))
             .filter((w) => w.length > 0)
             .filter((w) => !config.filterEnabled || !isBlocked(w))
         : [];
@@ -180,7 +182,7 @@ function ScreenPage() {
       window.clearInterval(timer);
       channel.unsubscribe("word", onMessage);
     };
-  }, [client, config.room, config.filterEnabled, topicId, ready]);
+  }, [client, config.room, config.filterEnabled, topicId, ready, topicLimit]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
