@@ -36,6 +36,7 @@ export async function loadMaskImage(dataUrl: string): Promise<HTMLImageElement> 
 // words trigger a redraw far more often than a new mask upload), so cache
 // the result and only redo the work when the mask or canvas size changes.
 let maskFieldCache: { key: string; inside: Uint8Array } | null = null;
+let maskErodedCache: { key: string; inside: Uint8Array } | null = null;
 
 function maskCacheKey(dataUrl: string, width: number, height: number): string {
   // dataUrl can be several MB; hashing the whole thing on every redraw would
@@ -43,17 +44,65 @@ function maskCacheKey(dataUrl: string, width: number, height: number): string {
   return `${dataUrl.length}:${dataUrl.slice(0, 48)}:${width}x${height}`;
 }
 
+/**
+ * Safety margin (canvas px) kept between words/shapes and the mask's artwork.
+ * Word placement works on a coarse grid and text has stroke/glow, so without
+ * a margin letters can graze the artwork's edge.
+ */
+export function maskMargin(width: number, height: number): number {
+  const base = Math.min(width, height);
+  const grid = Math.max(4, Math.round((base / 1000) * 16));
+  return Math.max(3, Math.round(grid * 0.5));
+}
+
+/** Shrinks the usable (1) area by `m` pixels in every direction (square window, O(n)). */
+function erodeMap(src: Uint8Array, w: number, h: number, m: number): Uint8Array {
+  if (m <= 0) return src;
+  const tmp = new Uint8Array(w * h);
+  const out = new Uint8Array(w * h);
+  const preRow = new Int32Array(w + 1);
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    for (let x = 0; x < w; x++) preRow[x + 1] = preRow[x]! + (src[row + x] === 0 ? 1 : 0);
+    for (let x = 0; x < w; x++) {
+      const lo = Math.max(0, x - m);
+      const hi = Math.min(w - 1, x + m);
+      tmp[row + x] = preRow[hi + 1]! - preRow[lo]! === 0 ? 1 : 0;
+    }
+  }
+  const preCol = new Int32Array(h + 1);
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h; y++) preCol[y + 1] = preCol[y]! + (tmp[y * w + x] === 0 ? 1 : 0);
+    for (let y = 0; y < h; y++) {
+      const lo = Math.max(0, y - m);
+      const hi = Math.min(h - 1, y + m);
+      out[y * w + x] = preCol[hi + 1]! - preCol[lo]! === 0 ? 1 : 0;
+    }
+  }
+  return out;
+}
+
 export async function getMaskInsideMap(
   dataUrl: string,
   width: number,
   height: number,
+  margin = 0,
 ): Promise<Uint8Array> {
   const key = maskCacheKey(dataUrl, width, height);
-  if (maskFieldCache && maskFieldCache.key === key) return maskFieldCache.inside;
-  const img = await loadMaskImage(dataUrl);
-  const inside = computeMaskInsideMap(img, width, height);
-  maskFieldCache = { key, inside };
-  return inside;
+  let raw: Uint8Array;
+  if (maskFieldCache && maskFieldCache.key === key) raw = maskFieldCache.inside;
+  else {
+    const img = await loadMaskImage(dataUrl);
+    raw = computeMaskInsideMap(img, width, height);
+    maskFieldCache = { key, inside: raw };
+    maskErodedCache = null;
+  }
+  if (margin <= 0) return raw;
+  const ekey = `${key}:${margin}`;
+  if (maskErodedCache && maskErodedCache.key === ekey) return maskErodedCache.inside;
+  const eroded = erodeMap(raw, width, height, margin);
+  maskErodedCache = { key: ekey, inside: eroded };
+  return eroded;
 }
 
 function getMaskDrawRect(img: HTMLImageElement, width: number, height: number) {
@@ -108,12 +157,14 @@ export async function paintMaskBackground(
   canvas: HTMLCanvasElement,
   dataUrl: string,
   background: string,
+  margin = 0,
 ): Promise<void> {
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) return;
 
   const img = await loadMaskImage(dataUrl);
   const inside = await getMaskInsideMap(dataUrl, canvas.width, canvas.height);
+  const roomy = await getMaskInsideMap(dataUrl, canvas.width, canvas.height, margin);
 
   ctx.fillStyle = background;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -122,13 +173,19 @@ export async function paintMaskBackground(
   ctx.drawImage(img, dx, dy, w, h);
 
   const [br, bg, bb] = hexToRgb(background);
+  // Near-identical shade for the safety margin: invisible on screen, but not
+  // the exact background colour, so the word placer treats it as blocked.
+  const nr = br > 8 ? br - 4 : br + 4;
+  const ng = bg > 8 ? bg - 4 : bg + 4;
+  const nb = bb > 8 ? bb - 4 : bb + 4;
   const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const px = frame.data;
   for (let p = 0, i = 0; p < inside.length; p++, i += 4) {
     if (inside[p] === 1) {
-      px[i] = br;
-      px[i + 1] = bg;
-      px[i + 2] = bb;
+      const free = roomy[p] === 1;
+      px[i] = free ? br : nr;
+      px[i + 1] = free ? bg : ng;
+      px[i + 2] = free ? bb : nb;
       px[i + 3] = 255;
     }
   }
@@ -154,7 +211,7 @@ export async function renderMaskPreview({ canvas, mask, excludeRects }: MaskPrev
   let inside: Uint8Array;
   if (mask) {
     try {
-      inside = await getMaskInsideMap(mask.dataUrl, width, height);
+      inside = await getMaskInsideMap(mask.dataUrl, width, height, maskMargin(width, height));
     } catch {
       inside = new Uint8Array(width * height).fill(1);
     }
@@ -267,7 +324,7 @@ export async function renderWordCloud({
   };
 
   if (mask) {
-    await paintMaskBackground(canvas, mask.dataUrl, palette.background);
+    await paintMaskBackground(canvas, mask.dataUrl, palette.background, maskMargin(canvas.width, canvas.height));
     if (token !== renderToken) return;
   } else {
     ctx.fillStyle = palette.background;

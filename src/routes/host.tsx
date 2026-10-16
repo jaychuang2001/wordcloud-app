@@ -1,19 +1,26 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ClientOnly } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { QrPanel } from "@/components/QrPanel";
 import { useWordCloudConfig } from "@/hooks/use-wordcloud-config";
 import { LOCAL_KEY_STORAGE, resetAblyClient, useAbly } from "@/lib/ably-client";
 import {
+  csvFilename,
   DEFAULT_TOPIC_MAX_LENGTH,
+  downloadCsv,
+  isTopicEnabled,
   joinUrl,
   loadBlocklist,
   loadTopicData,
   MAX_TOPICS,
   MIN_TOPICS,
   nextTopicId,
+  removeTopicData,
   saveExtraBlocklist,
+  toCsv,
+  topicHasData,
+  topicIsBoard,
   topicMaxLength,
   type TopicConfig,
 } from "@/lib/wordcloud-core";
@@ -79,11 +86,6 @@ function HostPage() {
     return () => window.clearInterval(timer);
   }, [config.room, config.topics, ready]);
 
-  const generalUrl = useMemo(
-    () => (origin ? joinUrl(origin, config.room, config.topics) : ""),
-    [origin, config.room, config.topics],
-  );
-
   const statusText =
     status === "connected"
       ? "已連線"
@@ -113,14 +115,34 @@ function HostPage() {
   function addTopic() {
     if (config.topics.length >= MAX_TOPICS) return;
     const id = nextTopicId(config.topics);
-    const newTopic: TopicConfig = { id, name: `主題 ${id}`, maxLength: DEFAULT_TOPIC_MAX_LENGTH };
+    const newTopic: TopicConfig = {
+      id,
+      name: `主題 ${id}`,
+      maxLength: DEFAULT_TOPIC_MAX_LENGTH,
+      enabled: false,
+    };
     update({ ...config, topics: [...config.topics, newTopic] });
   }
 
   function removeTopic(id: string) {
     if (config.topics.length <= MIN_TOPICS) return;
-    if (!window.confirm(`確定刪除「${config.topics.find((t) => t.id === id)?.name ?? id}」？該主題的大螢幕網址將失效（已累積的資料不會被刪除）。`))
+    const topic = config.topics.find((t) => t.id === id);
+    const name = topic?.name ?? id;
+    if (topicHasData(config.room, id)) {
+      const wantExport = window.confirm(
+        `「${name}」已有投稿資料。\n\n要先匯出成 CSV 嗎？\n按「確定」＝先匯出；按「取消」＝不匯出。`,
+      );
+      if (wantExport) {
+        downloadCsv(csvFilename(name), toCsv(loadTopicData(config.room, id), name));
+      }
+    }
+    if (
+      !window.confirm(
+        `確定刪除「${name}」？\n該主題的大螢幕網址將失效，所有暫存的投稿資料也會一併刪除，無法復原。`,
+      )
+    )
       return;
+    removeTopicData(config.room, id);
     update({ ...config, topics: config.topics.filter((t) => t.id !== id) });
   }
 
@@ -149,7 +171,7 @@ function HostPage() {
           </div>
         </header>
 
-        <section className="mt-8 grid gap-6 lg:grid-cols-[1.2fr_1fr]">
+        <section className="mt-8 grid gap-6">
           <div className="rounded-2xl border border-border bg-card p-6">
             <h2 className="text-lg font-bold text-foreground">房間與主題</h2>
 
@@ -186,6 +208,22 @@ function HostPage() {
                       </label>
                       <button
                         type="button"
+                        onClick={() => {
+                          const topics = config.topics.slice();
+                          topics[i] = { ...topic, enabled: !isTopicEnabled(topic) };
+                          update({ ...config, topics });
+                        }}
+                        className={
+                          "mb-0.5 shrink-0 rounded-xl border px-3 py-2.5 text-sm font-semibold " +
+                          (isTopicEnabled(topic)
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-border text-muted-foreground hover:bg-secondary")
+                        }
+                      >
+                        {isTopicEnabled(topic) ? "已啟用" : "啟用"}
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => removeTopic(topic.id)}
                         disabled={config.topics.length <= MIN_TOPICS}
                         title={config.topics.length <= MIN_TOPICS ? "至少要保留一個主題" : "刪除此主題"}
@@ -211,6 +249,9 @@ function HostPage() {
                         className="w-20 rounded-lg border border-input bg-background px-2.5 py-1.5 text-foreground outline-none focus:border-primary"
                       />
                       <span>字</span>
+                    </div>
+
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                       <button
                         type="button"
                         onClick={() => {
@@ -243,6 +284,10 @@ function HostPage() {
                       >
                         留言板（{BOARD_MAX_LENGTH} 字）
                       </button>
+                      <span className="text-xs">
+                        目前：{topicIsBoard(topic) ? "留言板模式（超過 5 字）" : "文字雲模式"}
+                        {isTopicEnabled(topic) ? "" : "　｜　尚未啟用，不會產生大螢幕連結與 QR Code"}
+                      </span>
                     </div>
                   </div>
                 );
@@ -306,18 +351,15 @@ function HostPage() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-border bg-card p-6">
-            <h2 className="text-lg font-bold text-foreground">通用加入 QR Code</h2>
-            <p className="mt-1 text-sm text-muted-foreground">掃碼後可自由切換所有主題。</p>
-            <div className="mt-5 flex flex-col items-center">
-              {generalUrl ? <QrPanel url={generalUrl} size={200} /> : null}
-              <p className="mt-3 break-all text-center text-xs text-muted-foreground">{generalUrl}</p>
-            </div>
-          </div>
         </section>
 
+        {config.topics.every((t) => !isTopicEnabled(t)) ? (
+          <p className="mt-8 rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+            尚未啟用任何主題。請在上方主題旁按「啟用」，才會出現大螢幕連結與專屬 QR Code。
+          </p>
+        ) : null}
         <section className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {config.topics.map((topic) => {
+          {config.topics.filter((t) => isTopicEnabled(t)).map((topic) => {
             const id = topic.id;
             const url = origin ? joinUrl(origin, config.room, config.topics, id) : "";
             return (
@@ -328,7 +370,7 @@ function HostPage() {
                   已累積 {counts[id] ?? 0} 個不重複詞彙
                 </p>
                 <div className="mt-4 flex justify-center">
-                  {url ? <QrPanel url={url} size={150} label="直接進入此主題" /> : null}
+                  {url ? <QrPanel url={url} size={150} label="此主題專屬 QR（只能投此主題）" /> : null}
                 </div>
                 <Link
                   to="/screen/$topicId"

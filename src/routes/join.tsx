@@ -8,6 +8,7 @@ import {
   isBlocked,
   loadBlocklist,
   normalizeWord,
+  topicIsBoard,
   topicMaxLength,
   topicsFromSearch,
 } from "@/lib/wordcloud-core";
@@ -77,6 +78,7 @@ function JoinPage() {
   const topics = useMemo(() => topicsFromSearch(search), [search]);
   const activeTopic = topics.find((t) => t.id === active) ?? topics[0];
   const activeMaxLength = topicMaxLength(activeTopic);
+  const isBoard = topicIsBoard(activeTopic);
   const cooling = (cooldowns[active] ?? 0) > 0;
 
   const statusText =
@@ -90,7 +92,7 @@ function JoinPage() {
 
   async function submit() {
     if (cooling) return;
-    const cleaned = words.map((w) => normalizeWord(w, activeMaxLength)).filter(Boolean);
+    const cleaned = words.slice(0, isBoard ? 1 : 3).map((w) => normalizeWord(w, activeMaxLength)).filter(Boolean);
     if (cleaned.length === 0) {
       setMessage("請至少輸入一個詞彙");
       return;
@@ -138,8 +140,11 @@ function JoinPage() {
         </div>
 
         <h1 className="mt-4 text-2xl font-black text-foreground">送出你的想法</h1>
-        <p className="mt-1 text-sm text-muted-foreground">選擇主題，輸入 1～3 個詞彙。</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {isBoard ? "寫下你想說的話。" : "輸入 1～3 個詞彙。"}
+        </p>
 
+        {topics.length > 1 ? (
         <div className="mt-5 flex flex-wrap gap-2 rounded-2xl border border-border bg-card p-1.5">
           {topics.map((t) => (
             <button
@@ -159,29 +164,45 @@ function JoinPage() {
             </button>
           ))}
         </div>
+        ) : null}
 
         <section className="mt-5 rounded-2xl border border-border bg-card p-5">
           <p className="text-sm font-semibold text-foreground">目前主題：{activeTopic?.name ?? ""}</p>
           <p className="mt-0.5 text-xs text-muted-foreground">每則最多 {activeMaxLength} 字</p>
           <div className="mt-4 space-y-3">
-            {words.map((w, i) => (
-              <input
-                key={i}
-                value={w}
-                maxLength={activeMaxLength}
-                onChange={(e) => {
+            {words.slice(0, isBoard ? 1 : 3).map((w, i) => {
+              const common = {
+                value: w,
+                maxLength: activeMaxLength,
+                onChange: (
+                  e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+                ) => {
                   const next = words.slice();
                   next[i] = e.target.value;
                   setWords(next);
                   setMessage("");
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void submit();
-                }}
-                placeholder={`詞彙 ${i + 1}${i === 0 ? "（必填）" : "（選填）"}`}
-                className="w-full rounded-xl border border-input bg-background px-4 py-3 text-base text-foreground outline-none focus:border-primary"
-              />
-            ))}
+                },
+                className:
+                  "w-full rounded-xl border border-input bg-background px-4 py-3 text-base text-foreground outline-none focus:border-primary",
+              };
+              return isBoard ? (
+                <div key={i}>
+                  <textarea {...common} rows={5} placeholder="輸入留言內容" />
+                  <p className="mt-1 text-right text-xs text-muted-foreground">
+                    {w.length} / {activeMaxLength}
+                  </p>
+                </div>
+              ) : (
+                <input
+                  key={i}
+                  {...common}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void submit();
+                  }}
+                  placeholder={`詞彙 ${i + 1}${i === 0 ? "（必填）" : "（選填）"}`}
+                />
+              );
+            })}
           </div>
 
           <button

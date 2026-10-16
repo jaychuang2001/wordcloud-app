@@ -1,5 +1,5 @@
 import type { Palette } from "./wordcloud-core";
-import { getMaskInsideMap, paintMaskBackground } from "./wordcloud-render";
+import { getMaskInsideMap, maskMargin, paintMaskBackground } from "./wordcloud-render";
 import type { ExcludeRect, MaskSource } from "./wordcloud-render";
 
 export type { ExcludeRect, MaskSource };
@@ -20,9 +20,11 @@ const FONT_STACK = '"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-se
 const HEART_COLORS = ["#ff2d55", "#ff5470", "#ff3b3b", "#ff6b81", "#ff1744", "#ff477e"];
 const STAR_COLORS = ["#ffd60a", "#ffe066", "#ffc300", "#ffdd57", "#ffb703"];
 const CLOUD_COLORS = ["#4cc9f0", "#48bfe3", "#5390d9", "#4ea8de", "#56cfe1"];
+const LANTERN_COLORS = ["#ff9500", "#ff8c1a", "#ffa31a", "#ff7b00", "#ffa033"];
 
-type ShapeKind = "heart" | "star" | "cloud";
-const SHAPE_KINDS: ShapeKind[] = ["heart", "star", "cloud"];
+type ShapeKind = "heart" | "star" | "cloud" | "lantern";
+// Four shapes, each picked with equal (25%) probability for a new word.
+const SHAPE_KINDS: ShapeKind[] = ["heart", "star", "cloud", "lantern"];
 
 // Each word gets a genuinely random shape the first time it's seen, then
 // keeps that shape for as long as it keeps appearing — so a word "grows"
@@ -41,6 +43,7 @@ function shapeForWord(word: string): ShapeKind {
 function colorsForShape(shape: ShapeKind): string[] {
   if (shape === "star") return STAR_COLORS;
   if (shape === "cloud") return CLOUD_COLORS;
+  if (shape === "lantern") return LANTERN_COLORS;
   return HEART_COLORS;
 }
 
@@ -119,9 +122,31 @@ function cloudPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: 
   ctx.closePath();
 }
 
+/**
+ * A sky lantern (天燈): a rounded, balloon-like body that narrows toward an
+ * open bottom, with a small flame underneath. Body spans about -0.5..0.34 of
+ * size vertically and ~0.85 of size at its widest.
+ */
+function lanternPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number) {
+  const X = (u: number) => cx + u * size;
+  const Y = (v: number) => cy + v * size;
+  ctx.beginPath();
+  ctx.moveTo(X(-0.28), Y(0.3));
+  ctx.bezierCurveTo(X(-0.5), Y(0.1), X(-0.52), Y(-0.5), X(0), Y(-0.5));
+  ctx.bezierCurveTo(X(0.52), Y(-0.5), X(0.5), Y(0.1), X(0.28), Y(0.3));
+  ctx.quadraticCurveTo(X(0), Y(0.36), X(-0.28), Y(0.3));
+  ctx.closePath();
+  // flame
+  ctx.moveTo(X(0), Y(0.35));
+  ctx.bezierCurveTo(X(0.07), Y(0.41), X(0.06), Y(0.5), X(0), Y(0.5));
+  ctx.bezierCurveTo(X(-0.06), Y(0.5), X(-0.07), Y(0.41), X(0), Y(0.35));
+  ctx.closePath();
+}
+
 function drawShapePath(ctx: CanvasRenderingContext2D, shape: ShapeKind, cx: number, cy: number, size: number) {
   if (shape === "star") starPath(ctx, cx, cy, size);
   else if (shape === "cloud") cloudPath(ctx, cx, cy, size);
+  else if (shape === "lantern") lanternPath(ctx, cx, cy, size);
   else heartPath(ctx, cx, cy - size / 2, size);
 }
 
@@ -158,14 +183,23 @@ function drawGlowingShape(
   ctx.restore();
 }
 
-/** Vertical offset (as a fraction of size) so text sits visually centered in each shape. */
+/**
+ * Vertical offset (fraction of size) so text sits at the visual middle of each
+ * shape. Heart: derived from the actual path (visual span 0.08..0.99 of size,
+ * centroid 0.416), +0.04 puts the label at ~50% of the heart's height where
+ * it is ~0.88*size wide. Lantern: the body (-0.5..0.34) is centred near -0.08.
+ */
 function textOffsetForShape(shape: ShapeKind): number {
-  // Star and cloud read as centered with no adjustment. The heart's glowing
-  // outline visually reads as "shorter" than its true path bounds (the
-  // pointed tail's glow is much less prominent than the wide top lobes), so
-  // without correction the label sits noticeably above center — push it down.
-  if (shape === "heart") return 0.16;
+  if (shape === "heart") return 0.04;
+  if (shape === "lantern") return -0.07;
   return 0;
+}
+
+/** Share of `size` the label may use in width, per shape. */
+function textWidthFactor(shape: ShapeKind): number {
+  if (shape === "lantern") return 0.6;
+  if (shape === "cloud") return 0.62;
+  return 0.68;
 }
 
 function fitFontSize(
@@ -226,9 +260,9 @@ export async function renderHeartCloud({
   let outerInside: Uint8Array | null = null;
   if (mask) {
     try {
-      outerInside = await getMaskInsideMap(mask.dataUrl, width, height);
+      outerInside = await getMaskInsideMap(mask.dataUrl, width, height, maskMargin(width, height));
       if (token !== renderToken) return;
-      await paintMaskBackground(canvas, mask.dataUrl, palette.background);
+      await paintMaskBackground(canvas, mask.dataUrl, palette.background, maskMargin(width, height));
       if (token !== renderToken) return;
     } catch {
       outerInside = null;
@@ -322,14 +356,14 @@ export async function renderHeartCloud({
         const cy = minY + radius + Math.random() * Math.max(1, spanY - radius * 2);
 
         if (hasMask) {
-          const pad = radius * 0.85;
-          const corners: [number, number][] = [
-            [cx, cy],
-            [cx - pad, cy],
-            [cx + pad, cy],
-            [cx, cy - pad],
-            [cx, cy + pad],
-          ];
+          // Sample the centre plus a ring (diagonals included) so no part of
+          // the shape or its glow can poke into blocked artwork.
+          const ringR = radius * 1.02;
+          const corners: [number, number][] = [[cx, cy]];
+          for (let k = 0; k < 16; k++) {
+            const ang = (Math.PI * 2 * k) / 16;
+            corners.push([cx + Math.cos(ang) * ringR, cy + Math.sin(ang) * ringR]);
+          }
           if (!corners.every(([px, py]) => isOuterInside(px, py))) continue;
         } else if (
           cx - radius < 0 ||
@@ -377,7 +411,7 @@ export async function renderHeartCloud({
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    const maxTextWidth = h.size * 0.68;
+    const maxTextWidth = h.size * textWidthFactor(shape);
     const fitted = fitFontSize(ctx, h.word, maxTextWidth, h.size * 0.24);
     ctx.font = `700 ${fitted}px ${FONT_STACK}`;
     const label = truncateForWidth(ctx, h.word, maxTextWidth);

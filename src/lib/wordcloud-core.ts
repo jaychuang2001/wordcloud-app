@@ -4,12 +4,30 @@ export type TopicId = string;
 export const MIN_TOPICS = 1;
 export const MAX_TOPICS = 12;
 
-export type TopicConfig = { id: TopicId; name: string; maxLength?: number };
+export type TopicConfig = {
+  id: TopicId;
+  name: string;
+  maxLength?: number;
+  /** Only enabled topics get a screen link / QR code. Missing = enabled (older saved configs). */
+  enabled?: boolean;
+};
+
+export function isTopicEnabled(topic: TopicConfig | undefined): boolean {
+  return Boolean(topic) && topic!.enabled !== false;
+}
 
 /** Hard ceiling regardless of what a topic is configured to allow (abuse guard). */
 export const ABSOLUTE_MAX_WORD_LENGTH = 200;
 /** Default per-topic limit for new topics — short, word-cloud-friendly. */
 export const DEFAULT_TOPIC_MAX_LENGTH = 5;
+
+/** Topics allowing more than this many characters are shown as a sticky-note board, not a word cloud. */
+export const WORD_CLOUD_MAX_LENGTH = DEFAULT_TOPIC_MAX_LENGTH;
+
+/** The display family is fixed by the character limit: <=5 = word cloud, >5 = message board. */
+export function topicIsBoard(topic: TopicConfig | undefined): boolean {
+  return topicMaxLength(topic) > WORD_CLOUD_MAX_LENGTH;
+}
 
 export function topicMaxLength(topic: TopicConfig | undefined): number {
   const n = topic?.maxLength;
@@ -39,11 +57,7 @@ export const DEFAULT_ROOM = "main";
 
 export const DEFAULT_CONFIG: RoomConfig = {
   room: DEFAULT_ROOM,
-  topics: [
-    { id: "1", name: "主題 A", maxLength: DEFAULT_TOPIC_MAX_LENGTH },
-    { id: "2", name: "主題 B", maxLength: DEFAULT_TOPIC_MAX_LENGTH },
-    { id: "3", name: "主題 C", maxLength: DEFAULT_TOPIC_MAX_LENGTH },
-  ],
+  topics: [{ id: "1", name: "主題 1", maxLength: DEFAULT_TOPIC_MAX_LENGTH, enabled: false }],
   filterEnabled: true,
 };
 
@@ -180,6 +194,26 @@ export function saveTopicData(room: string, topicId: TopicId, data: TopicData) {
       /* give up silently; the in-memory cloud keeps working */
     }
   }
+}
+
+export function removeTopicData(room: string, topicId: TopicId) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(dataKey(room, topicId));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function topicHasData(room: string, topicId: TopicId): boolean {
+  const d = loadTopicData(room, topicId);
+  return Object.keys(d.counts).length > 0 || d.records.length > 0;
+}
+
+/** Safe file name built from a topic name (keeps Chinese, strips characters filesystems reject). */
+export function csvFilename(topicName: string): string {
+  const cleaned = topicName.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "").trim().slice(0, 60);
+  return `${cleaned || "topic"}.csv`;
 }
 
 export function mergeWords(data: TopicData, words: string[], ts: number): TopicData {
@@ -370,14 +404,22 @@ export function paletteById(id: string): Palette {
 /* Misc                                                                */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Audience link. With a topicId the link carries ONLY that topic, so each
+ * topic's QR code is its own — scanning it never lets the phone switch to
+ * another topic (another topic needs its own QR code).
+ */
 export function joinUrl(
   origin: string,
   room: string,
   topics: TopicConfig[],
   topicId?: TopicId,
 ) {
-  const params = new URLSearchParams({ room, ids: topics.map((t) => t.id).join(",") });
-  topics.forEach((t) => {
+  const list = topicId
+    ? topics.filter((t) => t.id === topicId)
+    : topics.filter((t) => isTopicEnabled(t));
+  const params = new URLSearchParams({ room, ids: list.map((t) => t.id).join(",") });
+  list.forEach((t) => {
     params.set(`n${t.id}`, t.name);
     params.set(`m${t.id}`, String(topicMaxLength(t)));
   });
