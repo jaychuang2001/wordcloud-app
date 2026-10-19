@@ -1,11 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ClientOnly } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { QrPanel } from "@/components/QrPanel";
 import { useWordCloudConfig } from "@/hooks/use-wordcloud-config";
 import { LOCAL_KEY_STORAGE, resetAblyClient, useAbly } from "@/lib/ably-client";
 import {
+  BOARD_SUGGESTED_LENGTH,
   csvFilename,
   DEFAULT_TOPIC_MAX_LENGTH,
   downloadCsv,
@@ -19,15 +20,18 @@ import {
   removeTopicData,
   saveExtraBlocklist,
   toCsv,
+  topicDefaultMode,
   topicHasData,
-  topicIsBoard,
-  topicMaxLength,
+  topicSuggestedLength,
   type TopicConfig,
+  type TopicMode,
 } from "@/lib/wordcloud-core";
 
-// A generous-but-sane ceiling for "留言板" (message board) topics — not
-// literally unlimited, so a single sticky note can't blow out the layout.
-const BOARD_MAX_LENGTH = 150;
+const MODE_LABELS: Record<TopicMode, string> = {
+  cloud: "文字雲",
+  shape: "形狀（愛心／星星／雲朵／天燈）",
+  board: "留言板",
+};
 
 export const Route = createFileRoute("/host")({
   head: () => ({
@@ -86,6 +90,12 @@ function HostPage() {
     return () => window.clearInterval(timer);
   }, [config.room, config.topics, ready]);
 
+  const generalUrl = useMemo(
+    () => (origin ? joinUrl(origin, config.room, config.topics) : ""),
+    [origin, config.room, config.topics],
+  );
+  const enabledCount = config.topics.filter((t) => isTopicEnabled(t)).length;
+
   const statusText =
     status === "connected"
       ? "已連線"
@@ -119,6 +129,7 @@ function HostPage() {
       id,
       name: `主題 ${id}`,
       maxLength: DEFAULT_TOPIC_MAX_LENGTH,
+      mode: "cloud",
       enabled: false,
     };
     update({ ...config, topics: [...config.topics, newTopic] });
@@ -189,8 +200,31 @@ function HostPage() {
 
             <div className="mt-5 space-y-3">
               {config.topics.map((topic, i) => {
-                const currentMax = topicMaxLength(topic);
-                const isBoardPreset = currentMax === BOARD_MAX_LENGTH;
+                const currentMax = topicSuggestedLength(topic);
+                const currentMode = topicDefaultMode(topic);
+                const changeMode = (mode: TopicMode) => {
+                  if (mode === currentMode) return;
+                  if (
+                    !window.confirm(
+                      `要把「${topic.name}」的預設樣式改成「${MODE_LABELS[mode]}」嗎？\n開啟中的大螢幕若沒有自己切換過樣式，重新整理後會改用新的預設。`,
+                    )
+                  )
+                    return;
+                  const topics = config.topics.slice();
+                  // Move the suggested length along only if it was still the old style's default.
+                  const wasDefault =
+                    currentMax === (currentMode === "board" ? BOARD_SUGGESTED_LENGTH : DEFAULT_TOPIC_MAX_LENGTH);
+                  topics[i] = {
+                    ...topic,
+                    mode,
+                    maxLength: wasDefault
+                      ? mode === "board"
+                        ? BOARD_SUGGESTED_LENGTH
+                        : DEFAULT_TOPIC_MAX_LENGTH
+                      : currentMax,
+                  };
+                  update({ ...config, topics });
+                };
                 return (
                   <div key={topic.id} className="rounded-xl border border-border/60 p-3">
                     <div className="flex items-end gap-2">
@@ -234,7 +268,7 @@ function HostPage() {
                     </div>
 
                     <div className="mt-2.5 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                      <span>觀眾可輸入字數上限</span>
+                      <span>建議字數</span>
                       <input
                         type="number"
                         min={1}
@@ -248,46 +282,29 @@ function HostPage() {
                         }}
                         className="w-20 rounded-lg border border-input bg-background px-2.5 py-1.5 text-foreground outline-none focus:border-primary"
                       />
-                      <span>字</span>
+                      <span>字（只是提示，觀眾超過也能送出，上限 200 字）</span>
                     </div>
 
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const topics = config.topics.slice();
-                          topics[i] = { ...topic, maxLength: DEFAULT_TOPIC_MAX_LENGTH };
-                          update({ ...config, topics });
-                        }}
-                        className={
-                          "rounded-full border px-3 py-1 text-xs font-medium " +
-                          (!isBoardPreset
-                            ? "border-primary bg-primary/10 text-primary"
-                            : "border-border text-muted-foreground hover:bg-secondary")
-                        }
-                      >
-                        文字雲（{DEFAULT_TOPIC_MAX_LENGTH} 字）
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const topics = config.topics.slice();
-                          topics[i] = { ...topic, maxLength: BOARD_MAX_LENGTH };
-                          update({ ...config, topics });
-                        }}
-                        className={
-                          "rounded-full border px-3 py-1 text-xs font-medium " +
-                          (isBoardPreset
-                            ? "border-primary bg-primary/10 text-primary"
-                            : "border-border text-muted-foreground hover:bg-secondary")
-                        }
-                      >
-                        留言板（{BOARD_MAX_LENGTH} 字）
-                      </button>
-                      <span className="text-xs">
-                        目前：{topicIsBoard(topic) ? "留言板模式（超過 5 字）" : "文字雲模式"}
-                        {isTopicEnabled(topic) ? "" : "　｜　尚未啟用，不會產生大螢幕連結與 QR Code"}
-                      </span>
+                      <span>大螢幕預設樣式</span>
+                      {(["cloud", "shape", "board"] as TopicMode[]).map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => changeMode(m)}
+                          className={
+                            "rounded-full border px-3 py-1 text-xs font-medium " +
+                            (currentMode === m
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border text-muted-foreground hover:bg-secondary")
+                          }
+                        >
+                          {MODE_LABELS[m]}
+                        </button>
+                      ))}
+                      {isTopicEnabled(topic) ? null : (
+                        <span className="text-xs">尚未啟用，不會產生大螢幕連結與 QR Code</span>
+                      )}
                     </div>
                   </div>
                 );
@@ -351,6 +368,44 @@ function HostPage() {
             </div>
           </div>
 
+        </section>
+
+        <section className="mt-8 rounded-2xl border border-border bg-card p-6">
+          <h2 className="text-lg font-bold text-foreground">通用輸入網址（給用電腦的人）</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            這個網址可自由切換所有「已啟用」的主題（目前 {enabledCount} 個），不需掃碼。手機掃碼仍請用各主題的專屬 QR。
+          </p>
+          {enabledCount === 0 ? (
+            <p className="mt-3 text-sm text-muted-foreground">請先啟用至少一個主題。</p>
+          ) : (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <input
+                readOnly
+                value={generalUrl}
+                onFocus={(e) => e.currentTarget.select()}
+                className="min-w-0 flex-1 rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(generalUrl);
+                  setSavedNote("已複製通用網址");
+                  window.setTimeout(() => setSavedNote(""), 3000);
+                }}
+                className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground"
+              >
+                複製
+              </button>
+              <a
+                href={generalUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-xl border border-border px-5 py-2.5 text-sm font-semibold text-foreground hover:bg-secondary"
+              >
+                開啟
+              </a>
+            </div>
+          )}
         </section>
 
         {config.topics.every((t) => !isTopicEnabled(t)) ? (

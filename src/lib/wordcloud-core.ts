@@ -4,10 +4,16 @@ export type TopicId = string;
 export const MIN_TOPICS = 1;
 export const MAX_TOPICS = 12;
 
+/** The style a topic's big screen starts in. The screen can still switch between all three. */
+export type TopicMode = "cloud" | "shape" | "board";
+
 export type TopicConfig = {
   id: TopicId;
   name: string;
+  /** SUGGESTED length shown to the audience — not enforced (only ABSOLUTE_MAX_WORD_LENGTH is). */
   maxLength?: number;
+  /** Default display style. Missing = derived from the old character limit (older saved configs). */
+  mode?: TopicMode;
   /** Only enabled topics get a screen link / QR code. Missing = enabled (older saved configs). */
   enabled?: boolean;
 };
@@ -21,20 +27,23 @@ export const ABSOLUTE_MAX_WORD_LENGTH = 200;
 /** Default per-topic limit for new topics — short, word-cloud-friendly. */
 export const DEFAULT_TOPIC_MAX_LENGTH = 5;
 
-/** Topics allowing more than this many characters are shown as a sticky-note board, not a word cloud. */
-export const WORD_CLOUD_MAX_LENGTH = DEFAULT_TOPIC_MAX_LENGTH;
+/** Suggested length defaults per style. */
+export const BOARD_SUGGESTED_LENGTH = 150;
 
-/** The display family is fixed by the character limit: <=5 = word cloud, >5 = message board. */
-export function topicIsBoard(topic: TopicConfig | undefined): boolean {
-  return topicMaxLength(topic) > WORD_CLOUD_MAX_LENGTH;
+export function topicDefaultMode(topic: TopicConfig | undefined): TopicMode {
+  if (topic?.mode === "cloud" || topic?.mode === "shape" || topic?.mode === "board") return topic.mode;
+  // Older configs had no mode: a limit above 5 characters meant "message board".
+  const n = topic?.maxLength;
+  return typeof n === "number" && n > DEFAULT_TOPIC_MAX_LENGTH ? "board" : "cloud";
 }
 
-export function topicMaxLength(topic: TopicConfig | undefined): number {
+/** Suggested (soft) length for the audience; purely advisory. */
+export function topicSuggestedLength(topic: TopicConfig | undefined): number {
   const n = topic?.maxLength;
   if (typeof n === "number" && Number.isFinite(n) && n >= 1) {
     return Math.min(Math.floor(n), ABSOLUTE_MAX_WORD_LENGTH);
   }
-  return DEFAULT_TOPIC_MAX_LENGTH;
+  return topicDefaultMode(topic) === "board" ? BOARD_SUGGESTED_LENGTH : DEFAULT_TOPIC_MAX_LENGTH;
 }
 
 /** Smallest unused topic number, so newly added topics keep tidy, short ids like "4", "5"… */
@@ -57,7 +66,9 @@ export const DEFAULT_ROOM = "main";
 
 export const DEFAULT_CONFIG: RoomConfig = {
   room: DEFAULT_ROOM,
-  topics: [{ id: "1", name: "主題 1", maxLength: DEFAULT_TOPIC_MAX_LENGTH, enabled: false }],
+  topics: [
+    { id: "1", name: "主題 1", maxLength: DEFAULT_TOPIC_MAX_LENGTH, mode: "cloud", enabled: false },
+  ],
   filterEnabled: true,
 };
 
@@ -140,12 +151,20 @@ export function isBlocked(word: string, list = loadBlocklist()): boolean {
   return list.some((bad) => bad && lower.includes(bad.toLowerCase()));
 }
 
-/** @deprecated kept for anything not yet passing a per-topic limit; prefer topicMaxLength(). */
-export const MAX_WORD_LENGTH = 20;
-
-export function normalizeWord(raw: string, maxLength: number = MAX_WORD_LENGTH): string {
+/**
+ * Trims and tidies a submission. Single line breaks are kept (multi-line
+ * messages), runs of spaces collapse, and only the hidden safety cap applies.
+ */
+export function normalizeWord(raw: string, maxLength: number = ABSOLUTE_MAX_WORD_LENGTH): string {
   const limit = Math.min(Math.max(1, Math.floor(maxLength)), ABSOLUTE_MAX_WORD_LENGTH);
-  return raw.replace(/\s+/g, " ").trim().slice(0, limit);
+  return raw
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t\f\v]+/g, " ")
+    .replace(/ ?\n ?/g, "\n")
+    .replace(/\n{2,}/g, "\n")
+    .trim()
+    .slice(0, limit)
+    .trim();
 }
 
 /* ------------------------------------------------------------------ */
@@ -239,11 +258,11 @@ export function toCsv(data: TopicData, topicName: string): string {
   const lines = ["type,topic,word,count,time"];
   const sorted = Object.entries(data.counts).sort((a, b) => b[1] - a[1]);
   for (const [word, count] of sorted) {
-    lines.push(["count", topicName, word, count, ""].map(csvEscape).join(","));
+    lines.push(["count", topicName, word.replace(/\n/g, "\\n"), count, ""].map(csvEscape).join(","));
   }
   for (const r of data.records) {
     lines.push(
-      ["record", topicName, r.w, "", new Date(r.t).toISOString()].map(csvEscape).join(","),
+      ["record", topicName, r.w.replace(/\n/g, "\\n"), "", new Date(r.t).toISOString()].map(csvEscape).join(","),
     );
   }
   return "\uFEFF" + lines.join("\n");
@@ -288,7 +307,7 @@ export function mergeCsv(existing: TopicData, csv: string): TopicData {
     const cells = parseCsvLine(lines[i]!);
     if (hasTypeCol) {
       const type = cells[0]?.trim();
-      const word = normalizeWord(cells[idx("word")] ?? "");
+      const word = normalizeWord((cells[idx("word")] ?? "").replace(/\\n/g, "\n"));
       if (!word) continue;
       if (type === "count") {
         const n = Number(cells[idx("count")] ?? 0);
@@ -299,7 +318,7 @@ export function mergeCsv(existing: TopicData, csv: string): TopicData {
       }
     } else {
       // Tolerate a plain "word,count" file.
-      const word = normalizeWord(cells[0] ?? "");
+      const word = normalizeWord((cells[0] ?? "").replace(/\\n/g, "\n"));
       const n = Number(cells[1] ?? 1);
       if (word) counts[word] = (counts[word] ?? 0) + (Number.isFinite(n) && n > 0 ? n : 1);
     }
@@ -421,7 +440,8 @@ export function joinUrl(
   const params = new URLSearchParams({ room, ids: list.map((t) => t.id).join(",") });
   list.forEach((t) => {
     params.set(`n${t.id}`, t.name);
-    params.set(`m${t.id}`, String(topicMaxLength(t)));
+    params.set(`m${t.id}`, String(topicSuggestedLength(t)));
+    params.set(`t${t.id}`, topicDefaultMode(t));
   });
   if (topicId) params.set("topic", topicId);
   return `${origin}/join?${params.toString()}`;
@@ -438,10 +458,12 @@ export function topicsFromSearch(search: URLSearchParams): TopicConfig[] {
     : DEFAULT_CONFIG.topics.map((t) => t.id);
   return ids.map((id, i) => {
     const m = Number(search.get(`m${id}`));
+    const mode = search.get(`t${id}`);
     return {
       id,
       name: search.get(`n${id}`) || DEFAULT_CONFIG.topics[i]?.name || `主題 ${id}`,
       maxLength: Number.isFinite(m) && m >= 1 ? m : DEFAULT_TOPIC_MAX_LENGTH,
+      mode: mode === "board" || mode === "shape" || mode === "cloud" ? (mode as TopicMode) : "cloud",
     };
   });
 }

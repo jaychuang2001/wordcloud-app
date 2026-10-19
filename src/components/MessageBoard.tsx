@@ -68,7 +68,7 @@ export function MessageBoard({ records, maxNotes = 48 }: MessageBoardProps) {
               } as CSSProperties
             }
           >
-            <p className={longText ? "text-sm font-bold leading-snug" : "text-xl font-black leading-snug"}>
+            <p className={"whitespace-pre-wrap break-words " + (longText ? "text-sm font-bold leading-snug" : "text-xl font-black leading-snug")}>
               {note.w}
             </p>
           </div>

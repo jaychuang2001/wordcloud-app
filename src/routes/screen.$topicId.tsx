@@ -31,8 +31,8 @@ import {
   mergeCsv,
   mergeWords,
   normalizeWord,
-  topicIsBoard,
-  topicMaxLength,
+  topicDefaultMode,
+  type TopicMode,
   paletteById,
   PALETTES,
   saveTopicData,
@@ -98,10 +98,9 @@ function ScreenPage() {
   const [mask, setMask] = useState<MaskSource>(null);
   const [paletteId, setPaletteId] = useState("grey-wall");
   const [rotate, setRotate] = useState(true);
-  // Only the two cloud styles are switchable here. Whether a topic is a word
-  // cloud or a message board is decided in the host console (character limit)
-  // and can't be changed from the big screen.
-  const [cloudStyle, setCloudStyle] = useState<"text" | "heart">("text");
+  // Style currently shown. Starts from the host's default for this topic, and
+  // once switched here it is remembered per room/topic in this browser.
+  const [viewMode, setViewMode] = useState<TopicMode | null>(null);
   const [showMaskPreview, setShowMaskPreview] = useState(false);
   const [panel, setPanel] = useState(true);
   const [controlsVisible, setControlsVisible] = useState(true);
@@ -111,9 +110,11 @@ function ScreenPage() {
   const palette = paletteById(paletteId);
   const topic = config.topics.find((t) => t.id === topicId);
   const topicName = topic?.name ?? `主題 ${topicId}`;
-  const topicLimit = topicMaxLength(topic);
-  const isBoardTopic = topicIsBoard(topic);
-  const cloudMode: "text" | "heart" | "board" = isBoardTopic ? "board" : cloudStyle;
+  const viewKey = `wc:view:${config.room}:${topicId}`;
+  const mode: TopicMode = viewMode ?? topicDefaultMode(topic);
+  const isBoardTopic = mode === "board";
+  const cloudMode: "text" | "heart" | "board" =
+    mode === "board" ? "board" : mode === "shape" ? "heart" : "text";
   const topicActive = isTopicEnabled(topic);
 
   useEffect(() => setOrigin(window.location.origin), []);
@@ -151,6 +152,30 @@ function ScreenPage() {
     };
   }, [showControls]);
 
+  // Restore the style this screen was last switched to (if any).
+  useEffect(() => {
+    if (!ready) return;
+    try {
+      const saved = window.localStorage.getItem(viewKey);
+      setViewMode(saved === "cloud" || saved === "shape" || saved === "board" ? saved : null);
+    } catch {
+      setViewMode(null);
+    }
+  }, [ready, viewKey]);
+
+  function switchMode() {
+    const order: TopicMode[] = ["cloud", "shape", "board"];
+    const labels: Record<TopicMode, string> = { cloud: "文字雲", shape: "形狀", board: "留言板" };
+    const next = order[(order.indexOf(mode) + 1) % order.length]!;
+    if (!window.confirm(`要切換成「${labels[next]}」樣式嗎？`)) return;
+    setViewMode(next);
+    try {
+      window.localStorage.setItem(viewKey, next);
+    } catch {
+      /* ignore */
+    }
+  }
+
   // Load stored data whenever the room/topic changes.
   useEffect(() => {
     if (!ready) return;
@@ -167,7 +192,7 @@ function ScreenPage() {
       const payload = msg.data as { words?: unknown; ts?: unknown } | undefined;
       const words = Array.isArray(payload?.words)
         ? (payload!.words as unknown[])
-            .map((w) => normalizeWord(String(w), topicLimit))
+            .map((w) => normalizeWord(String(w)))
             .filter((w) => w.length > 0)
             .filter((w) => !config.filterEnabled || !isBlocked(w))
         : [];
@@ -191,7 +216,7 @@ function ScreenPage() {
       window.clearInterval(timer);
       channel.unsubscribe("word", onMessage);
     };
-  }, [client, config.room, config.filterEnabled, topicId, ready, topicLimit, topicActive]);
+  }, [client, config.room, config.filterEnabled, topicId, ready, topicActive]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -347,17 +372,13 @@ function ScreenPage() {
           {!isBoardTopic ? (
             <ScreenButton label={rotate ? "關閉文字傾斜" : "開啟文字傾斜"} onClick={() => setRotate((v) => !v)} icon={<RotateCcw />} />
           ) : null}
-          {isBoardTopic ? (
-            <span className="flex items-center gap-1 px-2 text-xs text-projection-muted">
-              <StickyNote className="size-4" /> 留言板模式（由主辦方控制台設定）
-            </span>
-          ) : (
+          <ScreenButton
+            label={`切換樣式（目前：${mode === "cloud" ? "文字雲" : mode === "shape" ? "形狀" : "留言板"}）`}
+            onClick={switchMode}
+            icon={mode === "cloud" ? <Type /> : mode === "shape" ? <Heart /> : <StickyNote />}
+          />
+          {!isBoardTopic ? (
             <>
-              <ScreenButton
-                label={cloudStyle === "text" ? "切換成形狀模式（愛心／星星／雲朵／天燈）" : "切換回文字雲"}
-                onClick={() => setCloudStyle((m) => (m === "text" ? "heart" : "text"))}
-                icon={cloudStyle === "text" ? <Heart /> : <Type />}
-              />
               <ScreenButton label="上傳形狀遮罩" onClick={() => maskRef.current?.click()} icon={<ImagePlus />} />
               <ScreenButton
                 label={showMaskPreview ? "關閉遮罩預覽" : "預覽遮罩範圍"}
@@ -366,7 +387,7 @@ function ScreenPage() {
               />
               {mask ? <ScreenButton label="移除遮罩" onClick={() => setMask(null)} icon={<Trash2 />} /> : null}
             </>
-          )}
+          ) : null}
           <ScreenButton label="匯出 CSV" onClick={() => downloadCsv(csvFilename(topicName), toCsv(data, topicName))} icon={<Download />} />
           <ScreenButton label="匯入歷史 CSV" onClick={() => fileRef.current?.click()} icon={<Upload />} />
           <ScreenButton label="進入全螢幕" onClick={toggleFullscreen} icon={<Maximize />} />

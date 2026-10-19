@@ -308,7 +308,8 @@ export async function renderWordCloud({
 
   const entries = Object.entries(counts)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, effectiveMaxWords);
+    .slice(0, effectiveMaxWords)
+    .map(([w, n]): [string, number] => [w.replace(/\n/g, " "), n]);
 
   if (entries.length === 0) {
     ctx.fillStyle = palette.background;

@@ -8,9 +8,10 @@ import {
   isBlocked,
   loadBlocklist,
   normalizeWord,
-  topicIsBoard,
-  topicMaxLength,
+  topicDefaultMode,
   topicsFromSearch,
+  topicSuggestedLength,
+  ABSOLUTE_MAX_WORD_LENGTH,
 } from "@/lib/wordcloud-core";
 
 const COOLDOWN_SECONDS = 10;
@@ -77,8 +78,8 @@ function JoinPage() {
   const room = search.get("room") || DEFAULT_ROOM;
   const topics = useMemo(() => topicsFromSearch(search), [search]);
   const activeTopic = topics.find((t) => t.id === active) ?? topics[0];
-  const activeMaxLength = topicMaxLength(activeTopic);
-  const isBoard = topicIsBoard(activeTopic);
+  const suggested = topicSuggestedLength(activeTopic);
+  const isBoard = topicDefaultMode(activeTopic) === "board";
   const cooling = (cooldowns[active] ?? 0) > 0;
 
   const statusText =
@@ -92,7 +93,7 @@ function JoinPage() {
 
   async function submit() {
     if (cooling) return;
-    const cleaned = words.slice(0, isBoard ? 1 : 3).map((w) => normalizeWord(w, activeMaxLength)).filter(Boolean);
+    const cleaned = words.slice(0, isBoard ? 1 : 3).map((w) => normalizeWord(w)).filter(Boolean);
     if (cleaned.length === 0) {
       setMessage("請至少輸入一個詞彙");
       return;
@@ -168,41 +169,35 @@ function JoinPage() {
 
         <section className="mt-5 rounded-2xl border border-border bg-card p-5">
           <p className="text-sm font-semibold text-foreground">目前主題：{activeTopic?.name ?? ""}</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">每則最多 {activeMaxLength} 字</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">建議 {suggested} 字內（可換行）</p>
           <div className="mt-4 space-y-3">
-            {words.slice(0, isBoard ? 1 : 3).map((w, i) => {
-              const common = {
-                value: w,
-                maxLength: activeMaxLength,
-                onChange: (
-                  e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
-                ) => {
-                  const next = words.slice();
-                  next[i] = e.target.value;
-                  setWords(next);
-                  setMessage("");
-                },
-                className:
-                  "w-full rounded-xl border border-input bg-background px-4 py-3 text-base text-foreground outline-none focus:border-primary",
-              };
-              return isBoard ? (
-                <div key={i}>
-                  <textarea {...common} rows={5} placeholder="輸入留言內容" />
-                  <p className="mt-1 text-right text-xs text-muted-foreground">
-                    {w.length} / {activeMaxLength}
-                  </p>
-                </div>
-              ) : (
-                <input
-                  key={i}
-                  {...common}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void submit();
+            {words.slice(0, isBoard ? 1 : 3).map((w, i) => (
+              <div key={i}>
+                <textarea
+                  value={w}
+                  maxLength={ABSOLUTE_MAX_WORD_LENGTH}
+                  rows={isBoard ? 5 : 2}
+                  onChange={(e) => {
+                    const next = words.slice();
+                    next[i] = e.target.value;
+                    setWords(next);
+                    setMessage("");
                   }}
-                  placeholder={`詞彙 ${i + 1}${i === 0 ? "（必填）" : "（選填）"}`}
+                  placeholder={
+                    isBoard ? "輸入留言內容" : `詞彙 ${i + 1}${i === 0 ? "（必填）" : "（選填）"}`
+                  }
+                  className="w-full resize-none rounded-xl border border-input bg-background px-4 py-3 text-base text-foreground outline-none focus:border-primary"
                 />
-              );
-            })}
+                <p
+                  className={
+                    "mt-1 text-right text-xs " +
+                    (w.length > suggested ? "text-orange-500" : "text-muted-foreground")
+                  }
+                >
+                  {w.length} / 建議 {suggested} 字
+                </p>
+              </div>
+            ))}
           </div>
 
           <button

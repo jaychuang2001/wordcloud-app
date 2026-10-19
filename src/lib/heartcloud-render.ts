@@ -199,30 +199,88 @@ function textOffsetForShape(shape: ShapeKind): number {
 function textWidthFactor(shape: ShapeKind): number {
   if (shape === "lantern") return 0.6;
   if (shape === "cloud") return 0.62;
+  if (shape === "star") return 0.55;
   return 0.68;
 }
 
-function fitFontSize(
+/** Share of `size` the label block may use in height, per shape. */
+function textHeightFactor(shape: ShapeKind): number {
+  if (shape === "lantern") return 0.55;
+  if (shape === "heart") return 0.5;
+  if (shape === "cloud") return 0.4;
+  return 0.38; // star
+}
+
+const MAX_LABEL_LINES = 4;
+
+/** Greedy wrap by character (works for CJK and Latin), honouring explicit line breaks. */
+function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  const lines: string[] = [];
+  for (const para of text.split("\n")) {
+    let cur = "";
+    for (const ch of Array.from(para)) {
+      if (cur && ctx.measureText(cur + ch).width > maxWidth) {
+        lines.push(cur);
+        cur = ch;
+      } else cur += ch;
+    }
+    lines.push(cur);
+  }
+  return lines;
+}
+
+/**
+ * Fits a label inside a shape. Short words stay on one line (shrinking a
+ * little if needed); longer text wraps onto several lines, shrinking until the
+ * block fits. Only if it still can't fit at the minimum size is it cut off
+ * with "…".
+ */
+function layoutLabel(
   ctx: CanvasRenderingContext2D,
   text: string,
   maxWidth: number,
+  maxHeight: number,
   startSize: number,
-  minSize = 9,
-): number {
-  let size = Math.max(minSize, Math.round(startSize));
-  ctx.font = `700 ${size}px ${FONT_STACK}`;
-  while (size > minSize && ctx.measureText(text).width > maxWidth) {
-    size -= 1;
-    ctx.font = `700 ${size}px ${FONT_STACK}`;
-  }
-  return size;
-}
+): { size: number; lines: string[] } {
+  const minSize = 9;
+  const setFont = (n: number) => {
+    ctx.font = `700 ${n}px ${FONT_STACK}`;
+  };
+  const start = Math.max(minSize, Math.round(startSize));
 
-function truncateForWidth(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
-  if (ctx.measureText(text).width <= maxWidth) return text;
-  let t = text;
-  while (t.length > 1 && ctx.measureText(`${t}…`).width > maxWidth) t = t.slice(0, -1);
-  return t.length < text.length ? `${t}…` : t;
+  // 1) Single line, if it stays reasonably large.
+  if (!text.includes("\n")) {
+    let n = start;
+    setFont(n);
+    while (n > minSize && ctx.measureText(text).width > maxWidth) {
+      n -= 1;
+      setFont(n);
+    }
+    if (ctx.measureText(text).width <= maxWidth && n >= startSize * 0.55) {
+      return { size: n, lines: [text] };
+    }
+  }
+
+  // 2) Wrap, shrinking until the block fits.
+  for (let n = start; n >= minSize; n -= 1) {
+    setFont(n);
+    const lines = wrapText(ctx, text, maxWidth);
+    if (lines.length <= MAX_LABEL_LINES && lines.length * n * 1.18 <= maxHeight) {
+      return { size: n, lines };
+    }
+  }
+
+  // 3) Still too long: smallest size, as many lines as fit, ellipsis on the last.
+  setFont(minSize);
+  const all = wrapText(ctx, text, maxWidth);
+  const fit = Math.max(1, Math.min(MAX_LABEL_LINES, Math.floor(maxHeight / (minSize * 1.18))));
+  const lines = all.slice(0, fit);
+  if (all.length > fit) {
+    let last = lines[fit - 1]!;
+    while (last.length > 1 && ctx.measureText(`${last}…`).width > maxWidth) last = last.slice(0, -1);
+    lines[fit - 1] = `${last}…`;
+  }
+  return { size: minSize, lines };
 }
 
 type PlacedHeart = { word: string; weight: number; x: number; y: number; size: number };
@@ -411,11 +469,18 @@ export async function renderHeartCloud({
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    const maxTextWidth = h.size * textWidthFactor(shape);
-    const fitted = fitFontSize(ctx, h.word, maxTextWidth, h.size * 0.24);
-    ctx.font = `700 ${fitted}px ${FONT_STACK}`;
-    const label = truncateForWidth(ctx, h.word, maxTextWidth);
-    ctx.fillText(label, h.x, h.y + h.size * textOffsetForShape(shape));
+    const { size: fontPx, lines } = layoutLabel(
+      ctx,
+      h.word,
+      h.size * textWidthFactor(shape),
+      h.size * textHeightFactor(shape),
+      h.size * 0.24,
+    );
+    ctx.font = `700 ${fontPx}px ${FONT_STACK}`;
+    const lineH = fontPx * 1.18;
+    const centerY = h.y + h.size * textOffsetForShape(shape);
+    const firstY = centerY - ((lines.length - 1) * lineH) / 2;
+    lines.forEach((line, li) => ctx.fillText(line, h.x, firstY + li * lineH));
     ctx.restore();
   }
   // Words that never found room after the minimum scale are silently
