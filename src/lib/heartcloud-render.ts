@@ -123,24 +123,31 @@ function cloudPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: 
 }
 
 /**
- * A sky lantern (天燈): a rounded, balloon-like body that narrows toward an
- * open bottom, with a small flame underneath. Body spans about -0.5..0.34 of
- * size vertically and ~0.85 of size at its widest.
+ * A sky lantern (天燈), traced from the reference picture: a rounded
+ * pentagon-like body (soft apex, rounded shoulders) that tapers down to an
+ * open round rim drawn as an ellipse. Units are fractions of `size`, with the
+ * origin at the middle of the whole drawing (body + rim), height ~1, width ~0.82.
  */
 function lanternPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number) {
   const X = (u: number) => cx + u * size;
   const Y = (v: number) => cy + v * size;
+  const apex: [number, number] = [0, -0.522];
+  const lSh: [number, number] = [-0.412, -0.312];
+  const rSh: [number, number] = [0.412, -0.312];
+  const bl: [number, number] = [-0.232, 0.463];
+  const br: [number, number] = [0.232, 0.463];
+  const rApex = 0.18 * size;
+  const rShoulder = 0.12 * size;
+
   ctx.beginPath();
-  ctx.moveTo(X(-0.28), Y(0.3));
-  ctx.bezierCurveTo(X(-0.5), Y(0.1), X(-0.52), Y(-0.5), X(0), Y(-0.5));
-  ctx.bezierCurveTo(X(0.52), Y(-0.5), X(0.5), Y(0.1), X(0.28), Y(0.3));
-  ctx.quadraticCurveTo(X(0), Y(0.36), X(-0.28), Y(0.3));
-  ctx.closePath();
-  // flame
-  ctx.moveTo(X(0), Y(0.35));
-  ctx.bezierCurveTo(X(0.07), Y(0.41), X(0.06), Y(0.5), X(0), Y(0.5));
-  ctx.bezierCurveTo(X(-0.06), Y(0.5), X(-0.07), Y(0.41), X(0), Y(0.35));
-  ctx.closePath();
+  ctx.moveTo(X(bl[0]), Y(bl[1]));
+  ctx.arcTo(X(lSh[0]), Y(lSh[1]), X(apex[0]), Y(apex[1]), rShoulder);
+  ctx.arcTo(X(apex[0]), Y(apex[1]), X(rSh[0]), Y(rSh[1]), rApex);
+  ctx.arcTo(X(rSh[0]), Y(rSh[1]), X(br[0]), Y(br[1]), rShoulder);
+  ctx.lineTo(X(br[0]), Y(br[1]));
+  // Open bottom rim (a separate sub-path).
+  ctx.moveTo(X(0.233), Y(0.463));
+  ctx.ellipse(X(0), Y(0.463), 0.233 * size, 0.036 * size, 0, 0, Math.PI * 2);
 }
 
 function drawShapePath(ctx: CanvasRenderingContext2D, shape: ShapeKind, cx: number, cy: number, size: number) {
@@ -187,17 +194,17 @@ function drawGlowingShape(
  * Vertical offset (fraction of size) so text sits at the visual middle of each
  * shape. Heart: derived from the actual path (visual span 0.08..0.99 of size,
  * centroid 0.416), +0.04 puts the label at ~50% of the heart's height where
- * it is ~0.88*size wide. Lantern: the body (-0.5..0.34) is centred near -0.08.
+ * it is ~0.88*size wide. Lantern: body centroid sits a little above the middle.
  */
 function textOffsetForShape(shape: ShapeKind): number {
   if (shape === "heart") return 0.04;
-  if (shape === "lantern") return -0.07;
+  if (shape === "lantern") return -0.03;
   return 0;
 }
 
 /** Share of `size` the label may use in width, per shape. */
 function textWidthFactor(shape: ShapeKind): number {
-  if (shape === "lantern") return 0.6;
+  if (shape === "lantern") return 0.55;
   if (shape === "cloud") return 0.62;
   if (shape === "star") return 0.55;
   return 0.68;
@@ -205,7 +212,7 @@ function textWidthFactor(shape: ShapeKind): number {
 
 /** Share of `size` the label block may use in height, per shape. */
 function textHeightFactor(shape: ShapeKind): number {
-  if (shape === "lantern") return 0.55;
+  if (shape === "lantern") return 0.48;
   if (shape === "heart") return 0.5;
   if (shape === "cloud") return 0.4;
   return 0.38; // star
