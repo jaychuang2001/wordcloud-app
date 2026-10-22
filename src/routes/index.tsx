@@ -48,12 +48,6 @@ function Index() {
           >
             主辦方控制台
           </Link>
-          <Link
-            to="/join"
-            className="rounded-xl border border-border bg-card px-8 py-3 text-base font-semibold text-foreground transition hover:bg-secondary"
-          >
-            我是觀眾，我要投稿
-          </Link>
         </div>
 
         <ul className="mt-14 grid w-full gap-4 text-left sm:grid-cols-3">
