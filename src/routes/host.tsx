@@ -27,6 +27,11 @@ import {
   type TopicMode,
 } from "@/lib/wordcloud-core";
 
+// Client-side gate only (anyone reading the page source could find it) — it keeps
+// casual users from editing the Ably key, it is not real security.
+const KEY_PASSWORD = "1213";
+const KEY_UNLOCK_FLAG = "wc:keyUnlocked";
+
 const MODE_LABELS: Record<TopicMode, string> = {
   cloud: "文字雲",
   shape: "形狀（愛心／星星／雲朵／天燈）",
@@ -65,10 +70,18 @@ function HostPage() {
   const [apiKey, setApiKey] = useState("");
   const [extraWords, setExtraWords] = useState("");
   const [savedNote, setSavedNote] = useState("");
+  const [keyUnlocked, setKeyUnlocked] = useState(false);
+  const [keyPassword, setKeyPassword] = useState("");
+  const [keyPasswordError, setKeyPasswordError] = useState("");
   const [counts, setCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     setOrigin(window.location.origin);
+    try {
+      setKeyUnlocked(window.sessionStorage.getItem(KEY_UNLOCK_FLAG) === "1");
+    } catch {
+      /* ignore */
+    }
     setApiKey(window.localStorage.getItem(LOCAL_KEY_STORAGE) ?? "");
     const built = loadBlocklist();
     const stored = window.localStorage.getItem("wc:blocklist");
@@ -104,6 +117,30 @@ function HostPage() {
         : status === "disconnected"
           ? "已中斷，重新連線中…"
           : `連線失敗：${error}`;
+
+  function tryUnlock() {
+    if (keyPassword === KEY_PASSWORD) {
+      setKeyUnlocked(true);
+      setKeyPassword("");
+      setKeyPasswordError("");
+      try {
+        window.sessionStorage.setItem(KEY_UNLOCK_FLAG, "1");
+      } catch {
+        /* ignore */
+      }
+    } else {
+      setKeyPasswordError("密碼錯誤");
+    }
+  }
+
+  function lockKey() {
+    setKeyUnlocked(false);
+    try {
+      window.sessionStorage.removeItem(KEY_UNLOCK_FLAG);
+    } catch {
+      /* ignore */
+    }
+  }
 
   function saveApiKey() {
     window.localStorage.setItem(LOCAL_KEY_STORAGE, apiKey.trim());
@@ -346,24 +383,61 @@ function HostPage() {
             </button>
 
             <div className="mt-8 border-t border-border pt-6">
-              <h3 className="text-sm font-bold text-foreground">Ably API Key（選填）</h3>
-              <p className="mt-1 text-xs text-muted-foreground">
-                若伺服器已設定金鑰，這裡留空即可。填入後本機會改用這把金鑰連線（測試用）。
-              </p>
-              <div className="mt-3 flex gap-2">
-                <input
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="xxxxx.yyyyy:zzzzzzzz"
-                  className="flex-1 rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground outline-none focus:border-primary"
-                />
-                <button
-                  onClick={saveApiKey}
-                  className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground"
-                >
-                  儲存
-                </button>
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-bold text-foreground">Ably API Key（選填）</h3>
+                {keyUnlocked ? (
+                  <button type="button" onClick={lockKey} className="text-xs text-muted-foreground underline">
+                    重新鎖定
+                  </button>
+                ) : null}
               </div>
+              {keyUnlocked ? (
+                <>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    若伺服器已設定金鑰，這裡留空即可。填入後本機會改用這把金鑰連線（測試用）。
+                  </p>
+                  <div className="mt-3 flex gap-2">
+                    <input
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder="xxxxx.yyyyy:zzzzzzzz"
+                      className="flex-1 rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground outline-none focus:border-primary"
+                    />
+                    <button
+                      onClick={saveApiKey}
+                      className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground"
+                    >
+                      儲存
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="mt-1 text-xs text-muted-foreground">🔒 已鎖定，輸入權限密碼後才能查看與修改。</p>
+                  <div className="mt-3 flex gap-2">
+                    <input
+                      type="password"
+                      value={keyPassword}
+                      onChange={(e) => {
+                        setKeyPassword(e.target.value);
+                        setKeyPasswordError("");
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") tryUnlock();
+                      }}
+                      placeholder="權限密碼"
+                      className="flex-1 rounded-xl border border-input bg-background px-4 py-2.5 text-sm text-foreground outline-none focus:border-primary"
+                    />
+                    <button
+                      onClick={tryUnlock}
+                      className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground"
+                    >
+                      解鎖
+                    </button>
+                  </div>
+                  {keyPasswordError ? <p className="mt-2 text-xs text-destructive">{keyPasswordError}</p> : null}
+                </>
+              )}
               {savedNote ? <p className="mt-2 text-xs text-primary">{savedNote}</p> : null}
             </div>
           </div>
