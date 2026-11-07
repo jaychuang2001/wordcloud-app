@@ -60,6 +60,8 @@ export type RoomConfig = {
   room: string;
   topics: TopicConfig[];
   filterEnabled: boolean;
+  /** Extra blocked words added by the host (shared through cloud sync). */
+  extraBlocklist?: string[];
 };
 
 export const DEFAULT_ROOM = "main";
@@ -89,6 +91,9 @@ export function loadConfig(): RoomConfig {
           ? (parsed.topics as TopicConfig[])
           : DEFAULT_CONFIG.topics,
       filterEnabled: parsed.filterEnabled !== false,
+      extraBlocklist: Array.isArray(parsed.extraBlocklist)
+        ? parsed.extraBlocklist.filter((w): w is string => typeof w === "string")
+        : [],
     };
   } catch {
     return DEFAULT_CONFIG;
@@ -104,7 +109,7 @@ export function saveConfig(config: RoomConfig) {
 /* Sensitive words                                                     */
 /* ------------------------------------------------------------------ */
 
-const BUILT_IN_BLOCKLIST = [
+export const BUILT_IN_BLOCKLIST = [
   "幹你娘",
   "幹您娘",
   "靠北",
@@ -139,6 +144,11 @@ export function loadBlocklist(): string[] {
   } catch {
     return BUILT_IN_BLOCKLIST;
   }
+}
+
+/** Built-in list plus the host's extra words from a room config. */
+export function blocklistFor(config: Pick<RoomConfig, "extraBlocklist">): string[] {
+  return [...BUILT_IN_BLOCKLIST, ...(config.extraBlocklist ?? [])];
 }
 
 export function saveExtraBlocklist(words: string[]) {
@@ -213,6 +223,14 @@ export function saveTopicData(room: string, topicId: TopicId, data: TopicData) {
       /* give up silently; the in-memory cloud keeps working */
     }
   }
+}
+
+/** Combines two topics' data: word counts add up, records are merged in time order. */
+export function mergeTopicData(a: TopicData, b: TopicData): TopicData {
+  const counts: Record<string, number> = { ...a.counts };
+  for (const [w, n] of Object.entries(b.counts)) counts[w] = (counts[w] ?? 0) + n;
+  const records = [...a.records, ...b.records].sort((x, y) => x.t - y.t);
+  return { counts, records };
 }
 
 export function removeTopicData(room: string, topicId: TopicId) {
@@ -468,6 +486,19 @@ export function topicsFromSearch(search: URLSearchParams): TopicConfig[] {
   });
 }
 
-export function channelName(room: string, topicId: TopicId) {
-  return `wc:${room}:topic${topicId}`;
+/** Live channel for one topic. `tenant` (the connected sheet's id) keeps different organisers apart. */
+export function channelName(room: string, topicId: TopicId, tenant = "") {
+  return `wc:${tenant ? tenant + ":" : ""}${room}:topic${topicId}`;
+}
+
+/** Channel the host uses to tell open big screens that the shared config changed. */
+export function controlChannelName(tenant = "") {
+  return `wc:${tenant ? tenant + ":" : ""}control`;
+}
+
+/** Audience link when a Google Sheet is connected: topics/names/limits come from the sheet itself. */
+export function joinUrlCloud(origin: string, scriptParam: string, topicId?: TopicId) {
+  const params = new URLSearchParams({ s: scriptParam });
+  if (topicId) params.set("topic", topicId);
+  return `${origin}/join?${params.toString()}`;
 }

@@ -1,13 +1,16 @@
 import { ClientOnly, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { useAbly } from "@/lib/ably-client";
+import { getAblyClient, resetAblyClient } from "@/lib/ably-client";
+import { fetchRemoteConfig, getScriptUrl, submitToCloud, tenantId } from "@/lib/cloud";
 import {
   channelName,
   DEFAULT_ROOM,
   isBlocked,
+  isTopicEnabled,
   loadBlocklist,
   normalizeWord,
+  type RoomConfig,
   topicDefaultMode,
   topicsFromSearch,
   topicSuggestedLength,
@@ -42,7 +45,6 @@ function JoinRoute() {
 }
 
 function JoinPage() {
-  const { client, status, error } = useAbly();
   const [search, setSearch] = useState<URLSearchParams>(() => new URLSearchParams());
   const [active, setActive] = useState<string>("");
   const [words, setWords] = useState(["", "", ""]);
@@ -50,16 +52,41 @@ function JoinPage() {
   const [sent, setSent] = useState(false);
   const [cooldowns, setCooldowns] = useState<Record<string, number>>({});
   const blocklist = useRef<string[]>([]);
+  // Sheet-connected links (?s=…): topics, names and limits come live from the sheet.
+  const [cloudMode, setCloudMode] = useState(false);
+  const [cloudConfig, setCloudConfig] = useState<RoomConfig | null | undefined>(undefined);
+  const [cloudFailed, setCloudFailed] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setSearch(params);
-    const initialTopics = topicsFromSearch(params);
-    const t = params.get("topic");
-    const initialActive =
-      t && initialTopics.some((topic) => topic.id === t) ? t : (initialTopics[0]?.id ?? "");
-    setActive(initialActive);
     blocklist.current = loadBlocklist();
+    const connected = Boolean(getScriptUrl()) && !params.has("ids");
+    setCloudMode(connected);
+    if (!connected) {
+      const initialTopics = topicsFromSearch(params);
+      const t = params.get("topic");
+      setActive(t && initialTopics.some((topic) => topic.id === t) ? t : (initialTopics[0]?.id ?? ""));
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      const res = await fetchRemoteConfig();
+      if (cancelled) return;
+      if (res.state === "on") {
+        setCloudFailed(false);
+        setCloudConfig(res.config);
+      } else {
+        setCloudFailed(true);
+        setCloudConfig((prev) => prev ?? null);
+      }
+    };
+    void load();
+    const timer = window.setInterval(() => void load(), 10000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -75,21 +102,26 @@ function JoinPage() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const room = search.get("room") || DEFAULT_ROOM;
-  const topics = useMemo(() => topicsFromSearch(search), [search]);
+  const onlyTopic = search.get("topic");
+  const room = cloudMode ? (cloudConfig?.room ?? "") : search.get("room") || DEFAULT_ROOM;
+  const topics = useMemo(() => {
+    if (!cloudMode) return topicsFromSearch(search);
+    if (!cloudConfig) return [];
+    // A per-topic QR carries ?topic=… and only ever shows that topic.
+    return cloudConfig.topics.filter(
+      (t) => isTopicEnabled(t) && (!onlyTopic || t.id === onlyTopic),
+    );
+  }, [cloudMode, cloudConfig, search, onlyTopic]);
+
+  // Keep the selected topic valid as the list refreshes.
+  useEffect(() => {
+    if (!cloudMode || topics.length === 0) return;
+    if (!topics.some((t) => t.id === active)) setActive(topics[0]!.id);
+  }, [cloudMode, topics, active]);
   const activeTopic = topics.find((t) => t.id === active) ?? topics[0];
   const suggested = topicSuggestedLength(activeTopic);
   const isBoard = topicDefaultMode(activeTopic) === "board";
   const cooling = (cooldowns[active] ?? 0) > 0;
-
-  const statusText =
-    status === "connected"
-      ? "已連線"
-      : status === "connecting"
-        ? "連線中…"
-        : status === "disconnected"
-          ? "重新連線中…"
-          : `連線失敗：${error}`;
 
   async function submit() {
     if (cooling) return;
@@ -103,21 +135,52 @@ function JoinPage() {
       setMessage(`「${bad}」包含不適當用語，請換一個詞`);
       return;
     }
-    if (!client || status !== "connected") {
-      setMessage("尚未連線，請稍候再試");
-      return;
-    }
+    setMessage("送出中…");
     try {
-      const channel = client.channels.get(channelName(room, active));
-      await channel.publish("word", { words: cleaned, ts: Date.now() });
+      // With cloud storage the server validates and stores the submission first
+      // (so every big screen sees the same data); then we publish it live.
+      const stored = await submitToCloud(room, active, cleaned);
+      if (stored.kind === "blocked") {
+        setMessage(`「${stored.word}」包含不適當用語，請換一個詞`);
+        return;
+      }
+      if (stored.kind === "rejected") {
+        setMessage(stored.message);
+        return;
+      }
+      const toPublish = stored.kind === "ok" ? stored.words : cleaned;
+      // Connect to the live channel only for this one send, then hang up again,
+      // so hundreds of open pages don't each hold a connection.
+      const client = await getAblyClient();
+      const channel = client.channels.get(channelName(room, active, cloudMode ? tenantId() : ""));
+      await Promise.race([
+        channel.publish("word", { words: toPublish, ts: Date.now() }),
+        new Promise((_, reject) => window.setTimeout(() => reject(new Error("publish_timeout")), 20000)),
+      ]);
+      resetAblyClient();
       setWords(["", "", ""]);
       setMessage("送出成功！大螢幕上見 🎉");
       setSent(true);
       window.setTimeout(() => setSent(false), 1200);
       setCooldowns((prev) => ({ ...prev, [active]: COOLDOWN_SECONDS }));
     } catch {
+      resetAblyClient();
       setMessage("送出失敗，請再試一次");
     }
+  }
+
+  if (cloudMode && (cloudConfig === undefined || topics.length === 0)) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-background px-5 py-8 text-center text-sm text-muted-foreground">
+        {cloudConfig === undefined
+          ? "讀取主題中…"
+          : cloudConfig === null
+            ? cloudFailed
+              ? "暫時連不上，請確認網路（此頁會自動重試）。"
+              : "主辦方尚未完成設定，請稍後（此頁會自動更新）。"
+            : "目前沒有開放投稿的主題（此頁會自動更新）。"}
+      </main>
+    );
   }
 
   return (
@@ -126,17 +189,8 @@ function JoinPage() {
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>房間：{room}</span>
           <span className="flex items-center gap-1.5">
-            <span
-              className={
-                "inline-block h-2 w-2 rounded-full " +
-                (status === "connected"
-                  ? "bg-primary"
-                  : status === "error"
-                    ? "bg-destructive"
-                    : "bg-muted-foreground animate-pulse")
-              }
-            />
-            {statusText}
+            <span className="inline-block h-2 w-2 rounded-full bg-primary" />
+            可以投稿
           </span>
         </div>
 

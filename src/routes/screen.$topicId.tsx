@@ -19,14 +19,18 @@ import { QrPanel } from "@/components/QrPanel";
 import { Button } from "@/components/ui/button";
 import { useWordCloudConfig } from "@/hooks/use-wordcloud-config";
 import { useAbly } from "@/lib/ably-client";
+import { fetchRemoteData, getScriptUrl, replaceRemoteData, scriptParam, tenantId } from "@/lib/cloud";
 import {
+  blocklistFor,
   channelName,
+  controlChannelName,
   csvFilename,
   downloadCsv,
   EMPTY_DATA,
   isBlocked,
   isTopicEnabled,
   joinUrl,
+  joinUrlCloud,
   loadTopicData,
   mergeCsv,
   mergeWords,
@@ -81,7 +85,14 @@ function ScreenRoute() {
 function ScreenPage() {
   const { topicId: raw } = Route.useParams();
   const topicId = raw;
-  const { config, ready } = useWordCloudConfig();
+  // Changes arrive instantly via an Ably signal from the host; this slow poll is only a safety net.
+  const {
+    config,
+    ready,
+    cloud,
+    link,
+    refresh: refreshConfig,
+  } = useWordCloudConfig({ pollMs: 60000 });
   const { client, status, error } = useAbly();
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -106,6 +117,7 @@ function ScreenPage() {
   const [controlsVisible, setControlsVisible] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
   const [origin, setOrigin] = useState("");
+  const [sheetParam, setSheetParam] = useState("");
 
   const palette = paletteById(paletteId);
   const topic = config.topics.find((t) => t.id === topicId);
@@ -117,11 +129,20 @@ function ScreenPage() {
     mode === "board" ? "board" : mode === "shape" ? "heart" : "text";
   const topicActive = isTopicEnabled(topic);
 
-  useEffect(() => setOrigin(window.location.origin), []);
+  useEffect(() => {
+    setOrigin(window.location.origin);
+    const u = getScriptUrl();
+    setSheetParam(u ? scriptParam(u) : "");
+  }, []);
 
   const joinLink = useMemo(
-    () => (origin ? joinUrl(origin, config.room, config.topics, topicId) : ""),
-    [origin, config.room, config.topics, topicId],
+    () =>
+      !origin
+        ? ""
+        : sheetParam
+          ? joinUrlCloud(origin, sheetParam, topicId)
+          : joinUrl(origin, config.room, config.topics, topicId),
+    [origin, sheetParam, config.room, config.topics, topicId],
   );
 
   const showControls = useCallback(() => {
@@ -176,25 +197,55 @@ function ScreenPage() {
     }
   }
 
-  // Load stored data whenever the room/topic changes.
+  // Load data whenever the room/topic changes. With cloud storage the shared
+  // copy is the source of truth and is re-read every few seconds (so several
+  // screens agree); otherwise the browser's own copy is used.
   useEffect(() => {
-    if (!ready) return;
-    const loaded = loadTopicData(config.room, topicId);
-    dataRef.current = loaded;
-    setData(loaded);
-  }, [config.room, topicId, ready]);
+    if (!ready || cloud === "checking") return;
+    if (cloud === "off") {
+      const loaded = loadTopicData(config.room, topicId);
+      dataRef.current = loaded;
+      setData(loaded);
+      return;
+    }
+    let cancelled = false;
+    const pull = async () => {
+      const remote = await fetchRemoteData(config.room, topicId);
+      if (cancelled || !remote) return;
+      dataRef.current = remote;
+      setData(remote);
+    };
+    void pull();
+    // New submissions arrive live through Ably; this slower re-read just re-syncs the full list.
+    const timer = window.setInterval(() => void pull(), 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [config.room, topicId, ready, cloud]);
+
+  // Host announces config changes on a control channel so screens update at once.
+  useEffect(() => {
+    if (!client) return;
+    const ctl = client.channels.get(controlChannelName(tenantId()));
+    const onCtl = () => refreshConfig();
+    void ctl.subscribe("config", onCtl);
+    return () => {
+      ctl.unsubscribe("config", onCtl);
+    };
+  }, [client, refreshConfig]);
 
   // Subscribe to the topic channel; buffer bursts and flush every 400ms.
   useEffect(() => {
     if (!client || !ready || !topicActive) return;
-    const channel = client.channels.get(channelName(config.room, topicId));
+    const channel = client.channels.get(channelName(config.room, topicId, tenantId()));
     const onMessage = (msg: { data?: unknown }) => {
       const payload = msg.data as { words?: unknown; ts?: unknown } | undefined;
       const words = Array.isArray(payload?.words)
         ? (payload!.words as unknown[])
             .map((w) => normalizeWord(String(w)))
             .filter((w) => w.length > 0)
-            .filter((w) => !config.filterEnabled || !isBlocked(w))
+            .filter((w) => !config.filterEnabled || !isBlocked(w, blocklistFor(config)))
         : [];
       if (words.length === 0) return;
       pendingRef.current.push({ words, ts: Number(payload?.ts) || Date.now() });
@@ -208,7 +259,8 @@ function ScreenPage() {
       let next = dataRef.current;
       for (const item of batch) next = mergeWords(next, item.words, item.ts);
       dataRef.current = next;
-      saveTopicData(config.room, topicId, next);
+      // With cloud storage the server already saved this submission.
+      if (cloud !== "on") saveTopicData(config.room, topicId, next);
       setData(next);
     }, 400);
 
@@ -216,7 +268,7 @@ function ScreenPage() {
       window.clearInterval(timer);
       channel.unsubscribe("word", onMessage);
     };
-  }, [client, config.room, config.filterEnabled, topicId, ready, topicActive]);
+  }, [client, config.room, config.filterEnabled, config.extraBlocklist, topicId, ready, topicActive, cloud]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -268,10 +320,19 @@ function ScreenPage() {
     return () => window.removeEventListener("resize", onResize);
   }, [draw]);
 
-  function applyData(next: TopicData) {
+  async function applyData(next: TopicData): Promise<boolean> {
+    if (cloud === "on") {
+      const ok = await replaceRemoteData(config.room, topicId, next);
+      if (!ok) {
+        window.alert("這個動作需要正確的主辦密碼，或雲端暫時無法使用，資料沒有變更。");
+        return false;
+      }
+    } else {
+      saveTopicData(config.room, topicId, next);
+    }
     dataRef.current = next;
-    saveTopicData(config.room, topicId, next);
     setData(next);
+    return true;
   }
 
   function onMaskFile(file: File) {
@@ -282,13 +343,13 @@ function ScreenPage() {
 
   function onCsvFile(file: File) {
     const reader = new FileReader();
-    reader.onload = () => applyData(mergeCsv(dataRef.current, String(reader.result)));
+    reader.onload = () => void applyData(mergeCsv(dataRef.current, String(reader.result)));
     reader.readAsText(file);
   }
 
   function clearAll() {
     if (!window.confirm(`確定清空「${topicName}」的所有資料？此動作無法復原。`)) return;
-    applyData({ counts: {}, records: [] });
+    void applyData({ counts: {}, records: [] });
   }
 
   function toggleFullscreen() {
@@ -307,6 +368,8 @@ function ScreenPage() {
           ? "重新連線中…"
           : `連線失敗：${error}`;
 
+  if (link === "unreachable" && cloud !== "on")
+    return <Centered text="連不上試算表，每 10 秒自動重試中…請確認這台電腦的網路。" />;
   if (ready && !topic) return <Centered text="找不到這個主題，可能已被刪除。請回主辦方控制台確認。" />;
   if (ready && !topicActive)
     return <Centered text={`「${topicName}」尚未啟用。請到主辦方控制台按下該主題的「啟用」，再重新整理此頁。`} />;

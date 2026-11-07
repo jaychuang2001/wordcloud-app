@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as HostRouteImport } from './routes/host'
+import { Route as ScreensRouteImport } from './routes/screens'
 import { Route as JoinRouteImport } from './routes/join'
 import { Route as ScreenTopicIdRouteImport } from './routes/screen.$topicId'
 
@@ -22,6 +23,11 @@ const IndexRoute = IndexRouteImport.update({
 const HostRoute = HostRouteImport.update({
   id: '/host',
   path: '/host',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ScreensRoute = ScreensRouteImport.update({
+  id: '/screens',
+  path: '/screens',
   getParentRoute: () => rootRouteImport,
 } as any)
 const JoinRoute = JoinRouteImport.update({
@@ -39,12 +45,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/host': typeof HostRoute
   '/join': typeof JoinRoute
+  '/screens': typeof ScreensRoute
   '/screen/$topicId': typeof ScreenTopicIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/host': typeof HostRoute
   '/join': typeof JoinRoute
+  '/screens': typeof ScreensRoute
   '/screen/$topicId': typeof ScreenTopicIdRoute
 }
 export interface FileRoutesById {
@@ -52,20 +60,22 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/host': typeof HostRoute
   '/join': typeof JoinRoute
+  '/screens': typeof ScreensRoute
   '/screen/$topicId': typeof ScreenTopicIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/host' | '/join' | '/screen/$topicId'
+  fullPaths: '/' | '/host' | '/join' | '/screens' | '/screen/$topicId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/host' | '/join' | '/screen/$topicId'
-  id: '__root__' | '/' | '/host' | '/join' | '/screen/$topicId'
+  to: '/' | '/host' | '/join' | '/screens' | '/screen/$topicId'
+  id: '__root__' | '/' | '/host' | '/join' | '/screens' | '/screen/$topicId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   HostRoute: typeof HostRoute
   JoinRoute: typeof JoinRoute
+  ScreensRoute: typeof ScreensRoute
   ScreenTopicIdRoute: typeof ScreenTopicIdRoute
 }
 
@@ -92,6 +102,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof JoinRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/screens': {
+      id: '/screens'
+      path: '/screens'
+      fullPath: '/screens'
+      preLoaderRoute: typeof ScreensRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/screen/$topicId': {
       id: '/screen/$topicId'
       path: '/screen/$topicId'
@@ -106,6 +123,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   HostRoute: HostRoute,
   JoinRoute: JoinRoute,
+  ScreensRoute: ScreensRoute,
   ScreenTopicIdRoute: ScreenTopicIdRoute,
 }
 export const routeTree = rootRouteImport
