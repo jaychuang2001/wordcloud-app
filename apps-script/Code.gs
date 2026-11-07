@@ -17,10 +17,8 @@
  *   每個主題一張工作表（名稱：編號｜主題名稱），欄位：時間、詞彙。
  */
 
-var BUILT_IN_BLOCKLIST = [
-  '幹你娘', '幹您娘', '靠北', '白痴', '智障', '去死', '廢物', '垃圾人', '婊子', '賤人',
-  '他媽的', '媽的', 'fuck', 'shit', 'bitch', 'asshole', 'bastard', 'cunt', 'dick', 'retard', 'nigger'
-];
+// 沒有內建敏感詞：只使用主辦方頁自訂的敏感詞。
+var BUILT_IN_BLOCKLIST = [];
 var CONFIG_SHEET = '設定';
 var MAX_RECORDS = 5000;
 var MAX_WORD = 200;

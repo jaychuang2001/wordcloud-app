@@ -109,29 +109,8 @@ export function saveConfig(config: RoomConfig) {
 /* Sensitive words                                                     */
 /* ------------------------------------------------------------------ */
 
-export const BUILT_IN_BLOCKLIST = [
-  "幹你娘",
-  "幹您娘",
-  "靠北",
-  "白痴",
-  "智障",
-  "去死",
-  "廢物",
-  "垃圾人",
-  "婊子",
-  "賤人",
-  "他媽的",
-  "媽的",
-  "fuck",
-  "shit",
-  "bitch",
-  "asshole",
-  "bastard",
-  "cunt",
-  "dick",
-  "retard",
-  "nigger",
-];
+// No built-in words: only the host's own list (set on the host page) is used.
+export const BUILT_IN_BLOCKLIST: string[] = [];
 
 const EXTRA_KEY = "wc:blocklist";
 

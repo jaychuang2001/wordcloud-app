@@ -872,10 +872,6 @@ function HostPage() {
               title="投放大螢幕頁（給大螢幕電腦）"
               hint={sp ? "從試算表讀取主題，選要投放哪一個。" : "需先連線 Google 試算表才能使用。"}
               url={screensUrl}
-              onCopied={() => {
-                setSavedNote("已複製網址");
-                window.setTimeout(() => setSavedNote(""), 3000);
-              }}
             />
             ) : null}
             <LinkRow
@@ -888,10 +884,6 @@ function HostPage() {
                     : `可切換所有「已啟用」的主題（目前 ${enabledCount} 個）。`
               }
               url={enabledCount === 0 ? "" : generalUrl}
-              onCopied={() => {
-                setSavedNote("已複製網址");
-                window.setTimeout(() => setSavedNote(""), 3000);
-              }}
             />
           </div>
         </section>
@@ -939,17 +931,8 @@ function HostPage() {
   );
 }
 
-function LinkRow({
-  title,
-  hint,
-  url,
-  onCopied,
-}: {
-  title: string;
-  hint: string;
-  url: string;
-  onCopied: () => void;
-}) {
+function LinkRow({ title, hint, url }: { title: string; hint: string; url: string }) {
+  const [copied, setCopied] = useState(false);
   return (
     <div>
       <p className="text-sm font-semibold text-foreground">{title}</p>
@@ -966,11 +949,12 @@ function LinkRow({
             type="button"
             onClick={() => {
               void navigator.clipboard?.writeText(url);
-              onCopied();
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 2500);
             }}
             className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground"
           >
-            複製
+            {copied ? "已複製 ✓" : "複製"}
           </button>
           <a
             href={url}
