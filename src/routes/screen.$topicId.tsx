@@ -24,15 +24,12 @@ import {
   blocklistFor,
   channelName,
   controlChannelName,
-  csvFilename,
-  downloadCsv,
   EMPTY_DATA,
   isBlocked,
   isTopicEnabled,
   joinUrl,
   joinUrlCloud,
   loadTopicData,
-  mergeCsv,
   mergeWords,
   normalizeWord,
   topicDefaultMode,
@@ -40,9 +37,9 @@ import {
   paletteById,
   PALETTES,
   saveTopicData,
-  toCsv,
   type TopicData,
 } from "@/lib/wordcloud-core";
+import { downloadXlsx, mergeFile } from "@/lib/xlsx-io";
 import { renderWordCloud, renderMaskPreview, type MaskSource } from "@/lib/wordcloud-render";
 import { renderHeartCloud } from "@/lib/heartcloud-render";
 import { MessageBoard } from "@/components/MessageBoard";
@@ -53,7 +50,7 @@ export const Route = createFileRoute("/screen/$topicId")({
       { title: "大螢幕文字雲｜點亮「心」光" },
       {
         name: "description",
-        content: "單一主題的全螢幕即時文字雲，支援形狀遮罩、CSV 匯出匯入與現場掃碼 QR Code。",
+        content: "單一主題的全螢幕即時文字雲，支援形狀遮罩、Excel 匯出匯入與現場掃碼 QR Code。",
       },
       { property: "og:title", content: "大螢幕文字雲｜點亮「心」光" },
       { property: "og:description", content: "現場投影的即時文字雲畫面。" },
@@ -342,9 +339,9 @@ function ScreenPage() {
   }
 
   function onCsvFile(file: File) {
-    const reader = new FileReader();
-    reader.onload = () => void applyData(mergeCsv(dataRef.current, String(reader.result)));
-    reader.readAsText(file);
+    void mergeFile(dataRef.current, file)
+      .then((merged) => applyData(merged))
+      .catch(() => window.alert("無法讀取這個檔案，請選擇由本程式匯出的 .xlsx 檔。"));
   }
 
   function clearAll() {
@@ -451,8 +448,8 @@ function ScreenPage() {
               {mask ? <ScreenButton label="移除遮罩" onClick={() => setMask(null)} icon={<Trash2 />} /> : null}
             </>
           ) : null}
-          <ScreenButton label="匯出 CSV" onClick={() => downloadCsv(csvFilename(topicName), toCsv(data, topicName))} icon={<Download />} />
-          <ScreenButton label="匯入歷史 CSV" onClick={() => fileRef.current?.click()} icon={<Upload />} />
+          <ScreenButton label="匯出 Excel" onClick={() => void downloadXlsx(topicName, data)} icon={<Download />} />
+          <ScreenButton label="匯入歷史 Excel" onClick={() => fileRef.current?.click()} icon={<Upload />} />
           <ScreenButton label="進入全螢幕" onClick={toggleFullscreen} icon={<Maximize />} />
           <ScreenButton label="清空資料" onClick={clearAll} icon={<Trash2 />} danger />
         </div>
@@ -472,7 +469,7 @@ function ScreenPage() {
       <input
         ref={fileRef}
         type="file"
-        accept=".csv,text/csv"
+        accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];

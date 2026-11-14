@@ -20,10 +20,8 @@ import {
 import { LOCAL_KEY_STORAGE, resetAblyClient, useAbly } from "@/lib/ably-client";
 import {
   BOARD_SUGGESTED_LENGTH,
-  csvFilename,
   DEFAULT_CONFIG,
   DEFAULT_TOPIC_MAX_LENGTH,
-  downloadCsv,
   isTopicEnabled,
   controlChannelName,
   joinUrl,
@@ -35,7 +33,6 @@ import {
   nextTopicId,
   removeTopicData,
   saveExtraBlocklist,
-  toCsv,
   topicDefaultMode,
   topicHasData,
   topicSuggestedLength,
@@ -43,6 +40,7 @@ import {
   type TopicData,
   type TopicMode,
 } from "@/lib/wordcloud-core";
+import { downloadXlsx } from "@/lib/xlsx-io";
 
 const MODE_LABELS: Record<TopicMode, string> = {
   cloud: "文字雲",
@@ -395,9 +393,9 @@ function HostPage() {
       : topicHasData(config.room, id);
     if (hasData && existing) {
       const wantExport = window.confirm(
-        `「${name}」已有投稿資料。\n\n要先匯出成 CSV 嗎？\n按「確定」＝先匯出；按「取消」＝不匯出。`,
+        `「${name}」已有投稿資料。\n\n要先匯出成 Excel 嗎？\n按「確定」＝先匯出；按「取消」＝不匯出。`,
       );
-      if (wantExport) downloadCsv(csvFilename(name), toCsv(existing, name));
+      if (wantExport) await downloadXlsx(name, existing);
     }
     if (
       !window.confirm(

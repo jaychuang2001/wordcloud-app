@@ -7,7 +7,7 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "支援 800 人同時參與的即時文字雲：主題與大螢幕數量可自行增減、手機掃碼輸入，資料留存於本機並可匯出匯入 CSV。",
+          "支援 800 人同時參與的即時文字雲：主題與大螢幕數量可自行增減、手機掃碼輸入，資料留存於本機並可匯出匯入 Excel。",
       },
       { property: "og:title", content: "2026年『佛青30．點亮心光』中華佛光青年團員大會｜點亮「心」光" },
       {
@@ -38,7 +38,7 @@ function Index() {
           2026年『佛青30．點亮心光』中華佛光青年團員大會
         </p>
         <p className="mt-5 max-w-xl text-base text-muted-foreground sm:text-lg">
-          現場觀眾掃碼輸入詞彙，主題與大螢幕數量可依需求增減，各自即時生長文字雲。資料自動存在瀏覽器，隔天續用，並可匯出／匯入 CSV。
+          現場觀眾掃碼輸入詞彙，主題與大螢幕數量可依需求增減，各自即時生長文字雲。資料自動存在瀏覽器，隔天續用，並可匯出／匯入 Excel。
         </p>
 
         <div className="mt-10 flex flex-col gap-3 sm:flex-row">
@@ -54,7 +54,7 @@ function Index() {
           {[
             { t: "多主題分流", d: "主題數量可自行增減，每個主題 /screen/{id} 各自全螢幕投影。" },
             { t: "形狀遮罩", d: "上傳黑白圖形，文字完美填入輪廓。" },
-            { t: "資料留存", d: "本機累積、CSV 匯出與歷史匯入合併。" },
+            { t: "資料留存", d: "本機累積、Excel 匯出（含每筆投稿時間）與歷史匯入合併。" },
           ].map((f) => (
             <li key={f.t} className="rounded-2xl border border-border bg-card/60 p-5">
               <p className="font-semibold text-foreground">{f.t}</p>
