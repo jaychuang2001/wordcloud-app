@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ClientOnly } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from "react";
 
 import { QrPanel } from "@/components/QrPanel";
 import { PREFER_LOCAL_FLAG, useWordCloudConfig } from "@/hooks/use-wordcloud-config";
@@ -658,11 +658,10 @@ function HostPage() {
 
             <label className="mt-5 block text-sm font-medium text-muted-foreground">
               房間名稱（觀眾掃碼會帶入）
-              <input
+              <DraftInput
                 value={config.room}
-                onChange={(e) =>
-                  update({ ...config, room: e.target.value.replace(/[\s/\\?&#%:"']/g, "").slice(0, 24) })
-                }
+                transform={(v) => v.replace(/[\s/\\?&#%:"']/g, "").slice(0, 24)}
+                onCommit={(room) => update({ ...config, room })}
                 className="mt-1.5 w-full rounded-xl border border-input bg-background px-4 py-2.5 text-base text-foreground outline-none focus:border-primary"
                 placeholder="main"
               />
@@ -700,11 +699,12 @@ function HostPage() {
                     <div className="flex items-end gap-2">
                       <label className="block flex-1 text-sm font-medium text-muted-foreground">
                         主題 {topic.id} 名稱
-                        <input
+                        <DraftInput
                           value={topic.name}
-                          onChange={(e) => {
+                          transform={(v) => v.slice(0, 20)}
+                          onCommit={(name) => {
                             const topics = config.topics.slice();
-                            topics[i] = { ...topic, name: e.target.value.slice(0, 20) };
+                            topics[i] = { ...topic, name };
                             update({ ...config, topics });
                           }}
                           className="mt-1.5 w-full rounded-xl border border-input bg-background px-4 py-2.5 text-base text-foreground outline-none focus:border-primary"
@@ -926,6 +926,47 @@ function HostPage() {
         )}
       </div>
     </main>
+  );
+}
+
+/** Text input that keeps its own draft so注音/拼音 composition on phones isn't
+ * interrupted by the parent re-rendering; commits when composition ends. */
+function DraftInput({
+  value,
+  onCommit,
+  transform = (v: string) => v,
+  ...rest
+}: {
+  value: string;
+  onCommit: (v: string) => void;
+  transform?: (v: string) => string;
+} & Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange">) {
+  const [draft, setDraft] = useState(value);
+  const composing = useRef(false);
+  useEffect(() => {
+    if (!composing.current) setDraft(value);
+  }, [value]);
+  const commit = (raw: string) => {
+    const v = transform(raw);
+    setDraft(v);
+    onCommit(v);
+  };
+  return (
+    <input
+      {...rest}
+      value={draft}
+      onChange={(e) => {
+        if (composing.current) setDraft(e.target.value);
+        else commit(e.target.value);
+      }}
+      onCompositionStart={() => {
+        composing.current = true;
+      }}
+      onCompositionEnd={(e) => {
+        composing.current = false;
+        commit(e.currentTarget.value);
+      }}
+    />
   );
 }
 
