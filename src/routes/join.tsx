@@ -186,8 +186,7 @@ function JoinPage() {
   return (
     <main className="min-h-screen bg-background px-5 py-8">
       <div className="mx-auto w-full max-w-md">
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>{cloudMode ? "" : `房間：${room}`}</span>
+        <div className="flex items-center justify-end text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-2 w-2 rounded-full bg-primary" />
             可以投稿
