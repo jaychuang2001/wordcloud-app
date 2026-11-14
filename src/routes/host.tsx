@@ -509,7 +509,7 @@ function HostPage() {
         <section className="mt-6 rounded-2xl border border-border bg-card p-5">
           <h2 className="text-base font-bold text-foreground">Google 試算表連線</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            設定、主題與每個主題的投稿都存在你自己的試算表，多台電腦因此能共用。步驟見專案的 README，Apps Script 程式在 apps-script/Code.gs。
+            設定、主題與投稿都存在你自己的試算表，多台電腦因此能共用。
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <input
@@ -594,7 +594,7 @@ function HostPage() {
               {cloud === "checking"
                 ? "檢查雲端中…"
                 : cloud === "off"
-                  ? "雲端同步：未啟用（設定與資料只存在這台電腦的瀏覽器）"
+                  ? "雲端同步：未啟用"
                   : sync === "saving"
                     ? "雲端同步：儲存中…"
                     : sync === "error"
@@ -886,11 +886,6 @@ function HostPage() {
           </div>
         </section>
 
-        {config.topics.every((t) => !isTopicEnabled(t)) ? (
-          <p className="mt-8 rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-            尚未啟用任何主題。請在上方主題旁按「啟用」，才會出現大螢幕連結與專屬 QR Code。
-          </p>
-        ) : null}
         <section className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {config.topics.filter((t) => isTopicEnabled(t)).map((topic) => {
             const id = topic.id;
@@ -908,7 +903,7 @@ function HostPage() {
                   已累積 {counts[id] ?? 0} 個不重複詞彙
                 </p>
                 <div className="mt-4 flex justify-center">
-                  {url ? <QrPanel url={url} size={150} label="此主題專屬 QR（只能投此主題）" /> : null}
+                  {url ? <QrPanel url={url} size={150} label="此主題專屬 QR" /> : null}
                 </div>
                 <a
                   href={screenHref}
@@ -916,7 +911,7 @@ function HostPage() {
                   rel="noreferrer"
                   className="mt-4 block rounded-xl bg-primary px-4 py-2.5 text-center text-sm font-semibold text-primary-foreground"
                 >
-                  開啟大螢幕 /screen/{id}
+                  開啟大螢幕
                 </a>
               </div>
             );

@@ -7,7 +7,7 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "支援 800 人同時參與的即時文字雲：主題與大螢幕數量可自行增減、手機掃碼輸入，資料留存於本機並可匯出匯入 Excel。",
+          "支援 800 人同時參與的即時文字雲：主題與大螢幕數量可自行增減、手機掃碼輸入，可匯出匯入 Excel。",
       },
       { property: "og:title", content: "2026年『佛青30．點亮心光』中華佛光青年團員大會｜點亮「心」光" },
       {
@@ -28,17 +28,14 @@ function Index() {
       <div className="pointer-events-none absolute bottom-0 right-0 h-[28rem] w-[28rem] rounded-full bg-accent/20 blur-3xl" />
 
       <div className="relative mx-auto flex min-h-screen max-w-3xl flex-col items-center justify-center px-6 py-16 text-center">
-        <span className="rounded-full border border-border bg-card/60 px-4 py-1 text-xs tracking-widest text-muted-foreground">
-          REAL-TIME WORD CLOUD
-        </span>
-        <h1 className="mt-6 text-5xl font-black leading-tight text-yellow-400 drop-shadow-sm sm:text-7xl">
+        <h1 className="text-5xl font-black leading-tight text-yellow-400 drop-shadow-sm sm:text-7xl">
           點亮「心」光
         </h1>
         <p className="mt-3 text-base font-bold text-foreground sm:text-xl">
           2026年『佛青30．點亮心光』中華佛光青年團員大會
         </p>
         <p className="mt-5 max-w-xl text-base text-muted-foreground sm:text-lg">
-          現場觀眾掃碼輸入詞彙，主題與大螢幕數量可依需求增減，各自即時生長文字雲。資料自動存在瀏覽器，隔天續用，並可匯出／匯入 Excel。
+          現場觀眾掃碼輸入詞彙或留言，大螢幕即時呈現。可匯出／匯入 Excel 保存紀錄。
         </p>
 
         <div className="mt-10 flex flex-col gap-3 sm:flex-row">
@@ -52,9 +49,9 @@ function Index() {
 
         <ul className="mt-14 grid w-full gap-4 text-left sm:grid-cols-3">
           {[
-            { t: "多主題分流", d: "主題數量可自行增減，每個主題 /screen/{id} 各自全螢幕投影。" },
-            { t: "形狀遮罩", d: "上傳黑白圖形，文字完美填入輪廓。" },
-            { t: "資料留存", d: "本機累積、Excel 匯出（含每筆投稿時間）與歷史匯入合併。" },
+            { t: "多主題分流", d: "主題數量可自行增減，每個主題各自全螢幕投影。" },
+            { t: "多種樣式", d: "文字雲、發光形狀、留言板三種呈現方式。" },
+            { t: "資料留存", d: "Excel 匯出（含每筆投稿時間），可匯入歷史資料合併。" },
           ].map((f) => (
             <li key={f.t} className="rounded-2xl border border-border bg-card/60 p-5">
               <p className="font-semibold text-foreground">{f.t}</p>

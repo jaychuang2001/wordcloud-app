@@ -379,8 +379,7 @@ function ScreenPage() {
       </div>
 
       <div ref={titleRef} className="pointer-events-none absolute left-8 top-6 text-projection-foreground">
-        <p className="text-xs uppercase text-projection-muted">主題 {topicId}</p>
-        <h1 className="mt-1 text-4xl font-black drop-shadow-lg">{topicName}</h1>
+        <h1 className="text-4xl font-black drop-shadow-lg">{topicName}</h1>
         <p className="mt-2 text-sm text-projection-muted">
           {totalWords} 個詞彙 · {totalEntries} 則投稿 · {statusText}
         </p>
@@ -412,6 +411,8 @@ function ScreenPage() {
 
       {panel && !fullscreen ? (
         <div className={`absolute bottom-6 left-1/2 z-20 flex max-w-[calc(100vw-9rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-2xl border border-projection-border bg-projection-panel p-2 text-projection-foreground shadow-2xl backdrop-blur-xl transition-all duration-300 ${controlsVisible ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0"}`}>
+          {!isBoardTopic ? (
+          <>
           <span className="px-2 text-xs font-bold uppercase text-projection-muted">投影配色</span>
           <div className="flex items-center gap-1 border-r border-projection-border pr-2">
             {PALETTES.slice(0, 4).map((item) => (
@@ -429,7 +430,9 @@ function ScreenPage() {
               </Button>
             ))}
           </div>
-          {!isBoardTopic ? (
+          </>
+          ) : null}
+          {mode === "cloud" ? (
             <ScreenButton label={rotate ? "關閉文字傾斜" : "開啟文字傾斜"} onClick={() => setRotate((v) => !v)} icon={<RotateCcw />} />
           ) : null}
           <ScreenButton

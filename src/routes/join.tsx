@@ -187,7 +187,7 @@ function JoinPage() {
     <main className="min-h-screen bg-background px-5 py-8">
       <div className="mx-auto w-full max-w-md">
         <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>房間：{room}</span>
+          <span>{cloudMode ? "" : `房間：${room}`}</span>
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-2 w-2 rounded-full bg-primary" />
             可以投稿
@@ -222,8 +222,9 @@ function JoinPage() {
         ) : null}
 
         <section className="mt-5 rounded-2xl border border-border bg-card p-5">
-          <p className="text-sm font-semibold text-foreground">目前主題：{activeTopic?.name ?? ""}</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">建議 {suggested} 字內（可換行）</p>
+          {topics.length > 1 ? null : (
+            <p className="text-sm font-semibold text-foreground">{activeTopic?.name ?? ""}</p>
+          )}
           <div className="mt-4 space-y-3">
             {words.slice(0, isBoard ? 1 : 3).map((w, i) => (
               <div key={i}>
