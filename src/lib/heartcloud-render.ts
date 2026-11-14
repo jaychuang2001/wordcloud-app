@@ -218,79 +218,30 @@ function textHeightFactor(shape: ShapeKind): number {
   return 0.38; // star
 }
 
-const MAX_LABEL_LINES = 4;
+type PlacedHeart = {
+  word: string;
+  weight: number;
+  x: number;
+  y: number;
+  size: number;
+  fontPx: number;
+  lines: string[];
+};
 
-/** Greedy wrap by character (works for CJK and Latin), honouring explicit line breaks. */
-function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
-  const lines: string[] = [];
+/** Split a label into balanced lines of at most ~4 characters each (max 4 lines). */
+function splitLabel(text: string): string[] {
+  const out: string[] = [];
   for (const para of text.split("\n")) {
-    let cur = "";
-    for (const ch of Array.from(para)) {
-      if (cur && ctx.measureText(cur + ch).width > maxWidth) {
-        lines.push(cur);
-        cur = ch;
-      } else cur += ch;
-    }
-    lines.push(cur);
+    let chars = Array.from(para.trim());
+    if (chars.length === 0) continue;
+    if (chars.length > 16) chars = [...chars.slice(0, 15), "…"];
+    const n = chars.length;
+    const lineCount = Math.min(4, Math.ceil(n / 4));
+    const per = Math.ceil(n / lineCount);
+    for (let i = 0; i < n; i += per) out.push(chars.slice(i, i + per).join(""));
   }
-  return lines;
+  return out.length ? out.slice(0, 4) : [text];
 }
-
-/**
- * Fits a label inside a shape. Short words stay on one line (shrinking a
- * little if needed); longer text wraps onto several lines, shrinking until the
- * block fits. Only if it still can't fit at the minimum size is it cut off
- * with "…".
- */
-function layoutLabel(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  maxWidth: number,
-  maxHeight: number,
-  startSize: number,
-): { size: number; lines: string[] } {
-  const minSize = 9;
-  const setFont = (n: number) => {
-    ctx.font = `700 ${n}px ${FONT_STACK}`;
-  };
-  const start = Math.max(minSize, Math.round(startSize));
-
-  // 1) Single line, if it stays reasonably large.
-  if (!text.includes("\n")) {
-    let n = start;
-    setFont(n);
-    while (n > minSize && ctx.measureText(text).width > maxWidth) {
-      n -= 1;
-      setFont(n);
-    }
-    if (ctx.measureText(text).width <= maxWidth && n >= startSize * 0.55) {
-      return { size: n, lines: [text] };
-    }
-  }
-
-  // 2) Wrap, shrinking until the block fits.
-  for (let n = start; n >= minSize; n -= 1) {
-    setFont(n);
-    const lines = wrapText(ctx, text, maxWidth);
-    if (lines.length <= MAX_LABEL_LINES && lines.length * n * 1.18 <= maxHeight) {
-      return { size: n, lines };
-    }
-  }
-
-  // 3) Still too long: smallest size, as many lines as fit, ellipsis on the last.
-  setFont(minSize);
-  const all = wrapText(ctx, text, maxWidth);
-  const fit = Math.max(1, Math.min(MAX_LABEL_LINES, Math.floor(maxHeight / (minSize * 1.18))));
-  const lines = all.slice(0, fit);
-  if (all.length > fit) {
-    let last = lines[fit - 1]!;
-    while (last.length > 1 && ctx.measureText(`${last}…`).width > maxWidth) last = last.slice(0, -1);
-    lines[fit - 1] = `${last}…`;
-  }
-  return { size: minSize, lines };
-}
-
-type PlacedHeart = { word: string; weight: number; x: number; y: number; size: number };
 
 let renderToken = 0;
 
@@ -310,7 +261,7 @@ export async function renderHeartCloud({
   counts,
   palette,
   mask,
-  maxHearts = 60,
+  maxHearts = 36,
   excludeRects,
 }: HeartCloudOptions): Promise<void> {
   const token = ++renderToken;
@@ -398,10 +349,10 @@ export async function renderHeartCloud({
 
   const maxWeight = entries[0]![1];
   const base = Math.min(width, height);
-  const sizeFor = (weight: number) => {
-    const ratio = Math.sqrt(weight / maxWeight);
-    return Math.max(base * 0.06, Math.min(base * 0.2, ratio * base * 0.18));
-  };
+  // Text first: the label size is fixed by legibility (readable from the back
+  // of the room), and each shape grows to wrap its label.
+  const fontFor = (weight: number) =>
+    base * (0.036 + 0.034 * Math.sqrt(weight / maxWeight));
 
   const spanX = Math.max(1, maxX - minX);
   const spanY = Math.max(1, maxY - minY);
@@ -413,7 +364,16 @@ export async function renderHeartCloud({
     const placed: PlacedHeart[] = [];
     let unplacedCount = 0;
     for (const [word, weight] of entries) {
-      const size = sizeFor(weight) * scale;
+      const shape = shapeForWord(word);
+      const fontPx = Math.max(14, fontFor(weight) * scale);
+      ctx.font = `700 ${fontPx}px ${FONT_STACK}`;
+      const lines = splitLabel(word);
+      const textW = Math.max(...lines.map((l) => ctx.measureText(l).width));
+      const textH = lines.length * fontPx * 1.18;
+      const size = Math.min(
+        base * 0.5,
+        Math.max(textW / textWidthFactor(shape), textH / textHeightFactor(shape)) * 1.1,
+      );
       const radius = size * 0.58;
       let ok = false;
       for (let attempt = 0; attempt < 60 && !ok; attempt++) {
@@ -421,8 +381,6 @@ export async function renderHeartCloud({
         const cy = minY + radius + Math.random() * Math.max(1, spanY - radius * 2);
 
         if (hasMask) {
-          // Sample the centre plus a ring (diagonals included) so no part of
-          // the shape or its glow can poke into blocked artwork.
           const ringR = radius * 1.02;
           const corners: [number, number][] = [[cx, cy]];
           for (let k = 0; k < 16; k++) {
@@ -446,7 +404,7 @@ export async function renderHeartCloud({
         });
         if (collides) continue;
 
-        placed.push({ word, weight, x: cx, y: cy, size });
+        placed.push({ word, weight, x: cx, y: cy, size, fontPx, lines });
         ok = true;
       }
       if (!ok) unplacedCount++;
@@ -457,7 +415,7 @@ export async function renderHeartCloud({
   let scale = 1;
   let layout = tryLayout(scale);
   let iterations = 0;
-  while (layout.unplacedCount > 0 && scale > 0.3 && iterations < 6) {
+  while (layout.unplacedCount > 0 && scale > 0.75 && iterations < 6) {
     scale *= 0.85;
     layout = tryLayout(scale);
     iterations++;
@@ -476,13 +434,7 @@ export async function renderHeartCloud({
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    const { size: fontPx, lines } = layoutLabel(
-      ctx,
-      h.word,
-      h.size * textWidthFactor(shape),
-      h.size * textHeightFactor(shape),
-      h.size * 0.24,
-    );
+    const { fontPx, lines } = h;
     ctx.font = `700 ${fontPx}px ${FONT_STACK}`;
     const lineH = fontPx * 1.18;
     const centerY = h.y + h.size * textOffsetForShape(shape);
